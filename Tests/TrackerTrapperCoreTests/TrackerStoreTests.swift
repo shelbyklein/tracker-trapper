@@ -43,4 +43,25 @@ final class TrackerStoreTests: XCTestCase {
         XCTAssertEqual(event?.type, "run_finished"); XCTAssertEqual(event?.message, "unresolved todos: TT-01")
         try? FileManager.default.removeItem(at: url)
     }
+
+    func testChangedTodoIDsAreRejectedWithoutMutatingPlan() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tracker-\(UUID().uuidString).json")
+        let store = try TrackerStore(url: url)
+        let plan = try await store.register(Plan(repository: "org/repo", issueNumber: 5, issueURL: "", title: "Original", todos: [Todo(id: "TT-01", description: "Original")]))
+        do { _ = try await store.register(Plan(id: plan.id, repository: "org/repo", issueNumber: 5, issueURL: "", title: "Changed", todos: [Todo(id: "TT-99", description: "Unexpected")])) ; XCTFail("expected conflict") }
+        catch let error as StoreError { if case .conflict = error {} else { XCTFail("unexpected error: \(error)") } }
+        let current = await store.read().plans[0]; XCTAssertEqual(current.title, "Original"); XCTAssertEqual(current.todos[0].id, "TT-01")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    func testInvalidTodoUpdateDoesNotAddEvent() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tracker-\(UUID().uuidString).json")
+        let store = try TrackerStore(url: url)
+        let plan = try await store.register(Plan(repository: "org/repo", issueNumber: 6, issueURL: "", title: "Test", todos: []))
+        let run = try await store.startRun(planID: plan.id, agent: "fixture", sessionID: "invalid", repositoryPath: "/tmp/invalid")
+        do { try await store.update(runID: run.id, todoID: "missing", status: .completed, message: nil); XCTFail("expected not found") }
+        catch let error as StoreError { if case .notFound = error {} else { XCTFail("unexpected error: \(error)") } }
+        let snapshot = await store.read(); XCTAssertEqual(snapshot.events.count, 1)
+        try? FileManager.default.removeItem(at: url)
+    }
 }
