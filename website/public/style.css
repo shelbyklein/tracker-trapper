@@ -88,3 +88,7 @@ body{overflow-x:clip}
 .theme-flight-layer{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:100;contain:strict}
 .theme-flight-layer img{position:absolute;left:0;top:0;max-width:none;object-fit:contain;will-change:transform}
 @media(prefers-reduced-motion:reduce){.theme-nest::before{transition:none;animation:none!important}}
+
+/* A small speech bubble points back to the nest switch. */
+.theme-hint{position:absolute;top:calc(100% + 4px);left:50%;transform:translateX(-50%) rotate(-5deg);padding:5px 9px;border-radius:10px;background:#f0ff58;color:#111318;font-size:10px;font-weight:750;line-height:1.2;white-space:nowrap;box-shadow:0 2px 5px #00000012;z-index:4}
+.theme-hint::before{content:"";position:absolute;top:-4px;left:calc(50% - 4px);width:8px;height:8px;background:inherit;transform:rotate(45deg)}
