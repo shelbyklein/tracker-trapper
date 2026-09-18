@@ -66,7 +66,7 @@ The GitHub tracking issue is the authoritative execution checklist for this plan
 ### Phase 2 — Durable local core
 
 - [ ] **TT-03 — Scaffold the application and service.** Establish source layout, minimum OS, reproducible build/run commands, service lifecycle and launch-at-login choice. Check: a fresh checkout builds and starts a menu-bar shell and local service; closing the popover does not lose collection.
-- [ ] **TT-04 — Implement the plan/event model and persistence.** Add schema migrations, stable IDs, revisions, task/run state validation, evidence and separate freshness timestamps. Check: restart/replay preserves state; duplicate and out-of-order events do not corrupt progress; simultaneous worktrees remain distinguishable.
+- [x] **TT-04 — Implement the plan/event model and persistence.** Add schema migrations, stable IDs, revisions, task/run state validation, evidence and separate freshness timestamps. Check: restart/replay preserves state; duplicate and out-of-order events do not corrupt progress; simultaneous worktrees remain distinguishable. Evidence: commit `73ac597c75f5ce11c6c3d2e8d803ac40a4fc0098`, `swift test` (3 passing tests), and the CLI round trip using a temporary store on 2026-09-17. The current durable backend is an atomic JSON event/state store; SQLite remains a future migration if query volume requires it.
 - [ ] **TT-05 — Implement the CLI and MCP interface.** Provide register_plan, get_plan, start_task, complete_task, report_blocker and run lifecycle operations through shared service validation. Check: both interfaces update the same records, reject invalid IDs/revisions, and return useful errors; unauthorized local requests fail.
 
 ### Phase 3 — Make reporting part of the workflow
