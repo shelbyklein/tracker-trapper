@@ -17,7 +17,7 @@ html=html.replace('</head>','<link rel="canonical" href="https://trackertrapper.
 (base/'public/index.html').write_text(html)
 shutil.copy2(source/'style.css',base/'public/style.css')
 for p in (source/'assets').iterdir():
- if p.suffix in ['.webp','.js','.gif','.woff2','.txt'] or p.name=='checkmark-nest-poster.png':shutil.copy2(p,base/'public/assets'/p.name)
+ if p.suffix in ['.webp','.js','.gif','.woff2','.txt','.svg'] or p.name=='checkmark-nest-poster.png':shutil.copy2(p,base/'public/assets'/p.name)
 (base/'public/robots.txt').write_text('User-agent: *\nAllow: /\nSitemap: https://trackertrapper.shelbyklein.com/sitemap.xml\n')
 (base/'public/sitemap.xml').write_text('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://trackertrapper.shelbyklein.com/</loc></url></urlset>')
 assert 'localhost' not in html
