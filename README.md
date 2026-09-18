@@ -23,3 +23,9 @@ The store defaults to `~/Library/Application Support/TrackerTrapper/store.json`.
 To synchronize the tracker-owned checklist block for an issue, set `TT_TRACKER_TRAPPER_BIN` to the built CLI and run `Integrations/sync-github-issue.sh --repo owner/name --issue 123 --plan-id <id> --dry-run` first. The script uses `gh` authentication, changes only its marked block, preserves unrelated issue content, and refuses to overwrite a changed tracker block unless `--force` is supplied.
 
 The menu-bar executable is a manual-login utility in this first release. Launch-at-login registration and a global summon shortcut remain open acceptance work; the normal menu-bar click is available once the app is running.
+
+## Local release handoff
+
+`scripts/package-app.sh` creates `dist/TrackerTrapper.app` with `LSUIElement=true`; open it from Finder or with `open dist/TrackerTrapper.app`. This local bundle is unsigned and unnotarized. Distribution signing, notarization, and a login-item installer are separate release work.
+
+The store lives at `~/Library/Application Support/TrackerTrapper/store.json`. Back it up by copying that file while the app is stopped, and restore it before relaunching. Removing or disabling the app does not remove the store; delete that file separately only when the user intends to erase local history. GitHub credentials are supplied by `gh` and are never written into plan files, the event store, or hook output.
