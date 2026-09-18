@@ -287,7 +287,8 @@ and reconnect its MCP clients after updating.
   to toggle all tasks; completed and skipped tasks are hidden in minimized mode.
 - After the pointer enters the panel, moving it outside dismisses the panel.
 - A bell icon shows grouped notices. Click it for details and dismissal controls.
-- **Stop watching** stops the issue's watchers and removes its card persistently.
+- Beside the task count, the GitHub icon opens the issue and the red **×**
+  (**Stop watching**) stops its watchers and removes its card persistently.
   Starting a new run for that issue brings it back; stored history is retained.
 - An explicitly selected next task gets a filled blue dot. The selection is not
   inferred from checklist order.

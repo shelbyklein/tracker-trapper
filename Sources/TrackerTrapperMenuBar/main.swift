@@ -322,9 +322,8 @@ struct TrackerTrapperMenuBar: App {
             } catch { self.error = "Unable to link session: \(error.localizedDescription)" }
         }
     }
-    func unlinkSession(_ runID: String) {
-        guard let watcher, let store,
-              let planID = snapshot.runs.first(where: { $0.id == runID })?.planID else { return }
+    func unlinkSession(_ planID: String) {
+        guard let watcher, let store else { return }
         Task {
             do {
                 let current = try await store.read()
@@ -599,36 +598,47 @@ struct PlanCard: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Button {
-                showsRemainingOnly.toggle()
-            } label: {
-                VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Button { showsRemainingOnly.toggle() } label: {
                     HStack {
                         Image(systemName: showsRemainingOnly ? "chevron.right" : "chevron.down")
                         Text("\(plan.repository) #\(plan.issueNumber)").font(.subheadline.bold())
-                        Spacer()
-                        Text("\(completed)/\(plan.todos.count)").monospacedDigit().foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                    }.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(showsRemainingOnly ? "Show all tasks" : "Show only remaining tasks")
+                .accessibilityValue(showsRemainingOnly ? "Remaining tasks only" : "All tasks")
+                Spacer(minLength: 2)
+                Text("\(completed)/\(plan.todos.count)").monospacedDigit().foregroundStyle(.secondary)
+                if let url = URL(string: plan.issueURL) {
+                    Link(destination: url) {
+                        GitHubMark().fill(.primary).frame(width: 15, height: 15)
+                            .frame(width: 26, height: 26).contentShape(Rectangle())
                     }
-                    Text(plan.title).lineLimit(2)
-                }.contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 5))
+                    .help("Open issue on GitHub")
+                    .accessibilityLabel("Open \(plan.repository) #\(plan.issueNumber) on GitHub")
+                }
+                Group {
+                    Button { onUnlink(plan.id) } label: {
+                        Image(systemName: "xmark").font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.red).frame(width: 26, height: 26).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 5))
+                    .help("Stop watching and remove this issue from Tracker Trapper")
+                    .accessibilityLabel("Stop watching \(plan.repository) #\(plan.issueNumber) and remove its task list")
+                }
             }
-            .buttonStyle(.plain)
-            .help(showsRemainingOnly ? "Show all tasks" : "Show only remaining tasks")
-            .accessibilityLabel("\(plan.repository) #\(plan.issueNumber): \(plan.title)")
-            .accessibilityValue(showsRemainingOnly ? "Remaining tasks only" : "All tasks")
-            .accessibilityHint("Activate to \(showsRemainingOnly ? "show all tasks" : "hide completed and skipped tasks")")
+            Text(plan.title).lineLimit(2)
             ProgressView(value: Double(completed), total: Double(max(plan.todos.count, 1)))
-            ForEach(runs.filter { run in run.status == .active || watches.contains { $0.runID == run.id } }) { run in
+            ForEach(runs.filter { run in run.status == .active && !watches.contains { $0.runID == run.id } }) { run in
                 HStack {
                     Spacer()
-                    if watches.contains(where: { $0.runID == run.id }) {
-                        Button("Stop watching") { onUnlink(run.id) }.font(.caption)
-                            .help("Stop watching and remove this issue from Tracker Trapper")
-                            .accessibilityLabel("Stop watching \(plan.repository) #\(plan.issueNumber) and remove its task list")
-                    } else {
-                        Button("Link session…") { onLink(run) }.font(.caption)
-                            .accessibilityLabel("Link \(run.agent) session")
-                    }
+                    Button("Link session…") { onLink(run) }.font(.caption)
+                        .accessibilityLabel("Link \(run.agent) session")
                 }
             }
             ForEach(visibleTodos) { todo in
@@ -701,5 +711,43 @@ private struct CompletionCelebrationCard: View {
             guard playing, !reduceMotion else { return }
             withAnimation(.easeOut(duration: 2.5)) { burst = true }
         }
+    }
+}
+
+// GitHub mark from Primer Octicons (MIT): https://github.com/primer/octicons
+private struct GitHubMark: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: 6.766, y: 11.328))
+        path.addCurve(to: CGPoint(x: 3.25, y: 7.671999999999999), control1: CGPoint(x: 4.702999999999999, y: 11.078), control2: CGPoint(x: 3.25, y: 9.594))
+        path.addCurve(to: CGPoint(x: 4.0, y: 5.483999999999998), control1: CGPoint(x: 3.25, y: 6.890999999999999), control2: CGPoint(x: 3.531, y: 6.046999999999999))
+        path.addCurve(to: CGPoint(x: 4.063, y: 3.4219999999999984), control1: CGPoint(x: 3.797, y: 4.9689999999999985), control2: CGPoint(x: 3.828, y: 3.8749999999999982))
+        path.addCurve(to: CGPoint(x: 6.031, y: 4.124999999999998), control1: CGPoint(x: 4.688, y: 3.3439999999999985), control2: CGPoint(x: 5.531, y: 3.6719999999999984))
+        path.addCurve(to: CGPoint(x: 8.016, y: 3.843999999999998), control1: CGPoint(x: 6.625, y: 3.9379999999999984), control2: CGPoint(x: 7.25, y: 3.843999999999998))
+        path.addCurve(to: CGPoint(x: 9.969, y: 4.108999999999998), control1: CGPoint(x: 8.781, y: 3.843999999999998), control2: CGPoint(x: 9.406, y: 3.937999999999998))
+        path.addCurve(to: CGPoint(x: 11.937999999999999, y: 3.421999999999998), control1: CGPoint(x: 10.453, y: 3.6719999999999984), control2: CGPoint(x: 11.312999999999999, y: 3.343999999999998))
+        path.addCurve(to: CGPoint(x: 11.983999999999998, y: 5.468999999999998), control1: CGPoint(x: 12.155999999999999, y: 3.843999999999998), control2: CGPoint(x: 12.187999999999999, y: 4.936999999999998))
+        path.addCurve(to: CGPoint(x: 12.749999999999998, y: 7.671999999999997), control1: CGPoint(x: 12.483999999999998, y: 6.061999999999998), control2: CGPoint(x: 12.749999999999998, y: 6.858999999999997))
+        path.addCurve(to: CGPoint(x: 9.202999999999998, y: 11.311999999999998), control1: CGPoint(x: 12.749999999999998, y: 9.593999999999998), control2: CGPoint(x: 11.296999999999999, y: 11.046999999999997))
+        path.addCurve(to: CGPoint(x: 10.092999999999998, y: 13.265999999999998), control1: CGPoint(x: 9.733999999999998, y: 11.655999999999997), control2: CGPoint(x: 10.092999999999998, y: 12.405999999999997))
+        path.addLine(to: CGPoint(x: 10.092999999999998, y: 14.890999999999998))
+        path.addCurve(to: CGPoint(x: 10.952999999999998, y: 15.437999999999999), control1: CGPoint(x: 10.092999999999998, y: 15.358999999999998), control2: CGPoint(x: 10.483999999999998, y: 15.624999999999998))
+        path.addCurve(to: CGPoint(x: 16.0, y: 8.03), control1: CGPoint(x: 13.781, y: 14.359), control2: CGPoint(x: 16.0, y: 11.53))
+        path.addCurve(to: CGPoint(x: 7.984, y: 0.0), control1: CGPoint(x: 16.0, y: 3.61), control2: CGPoint(x: 12.406, y: 0.0))
+        path.addCurve(to: CGPoint(x: 0.0, y: 8.031), control1: CGPoint(x: 3.563, y: 0.0), control2: CGPoint(x: 0.0, y: 3.61))
+        path.addCurve(to: CGPoint(x: 5.171999999999999, y: 15.452999999999998), control1: CGPoint(x: -0.009220199158588783, y: 11.346743587366875), control2: CGPoint(x: 2.0581816139718287, y: 14.313537140548227))
+        path.addCurve(to: CGPoint(x: 6.0, y: 14.905999999999999), control1: CGPoint(x: 5.593999999999999, y: 15.609), control2: CGPoint(x: 6.0, y: 15.328))
+        path.addLine(to: CGPoint(x: 6.0, y: 13.655999999999999))
+        path.addCurve(to: CGPoint(x: 5.25, y: 13.812), control1: CGPoint(x: 5.781, y: 13.749999999999998), control2: CGPoint(x: 5.5, y: 13.812))
+        path.addCurve(to: CGPoint(x: 3.172, y: 12.203), control1: CGPoint(x: 4.219, y: 13.812), control2: CGPoint(x: 3.6100000000000003, y: 13.25))
+        path.addCurve(to: CGPoint(x: 2.4530000000000003, y: 11.484), control1: CGPoint(x: 3.0, y: 11.780999999999999), control2: CGPoint(x: 2.8120000000000003, y: 11.530999999999999))
+        path.addCurve(to: CGPoint(x: 2.2030000000000003, y: 11.297), control1: CGPoint(x: 2.2660000000000005, y: 11.469), control2: CGPoint(x: 2.2030000000000003, y: 11.391))
+        path.addCurve(to: CGPoint(x: 2.8280000000000003, y: 10.969000000000001), control1: CGPoint(x: 2.2030000000000003, y: 11.109), control2: CGPoint(x: 2.5160000000000005, y: 10.969000000000001))
+        path.addCurve(to: CGPoint(x: 4.078, y: 11.829), control1: CGPoint(x: 3.281, y: 10.969000000000001), control2: CGPoint(x: 3.672, y: 11.250000000000002))
+        path.addCurve(to: CGPoint(x: 5.109, y: 12.484), control1: CGPoint(x: 4.391, y: 12.281), control2: CGPoint(x: 4.718, y: 12.484))
+        path.addCurve(to: CGPoint(x: 6.109, y: 11.984), control1: CGPoint(x: 5.5, y: 12.484), control2: CGPoint(x: 5.75, y: 12.344))
+        path.addCurve(to: CGPoint(x: 6.766, y: 11.328), control1: CGPoint(x: 6.375, y: 11.719), control2: CGPoint(x: 6.579, y: 11.484))
+        path.closeSubpath()
+        return path.applying(CGAffineTransform(scaleX: rect.width / 16, y: rect.height / 16))
     }
 }
