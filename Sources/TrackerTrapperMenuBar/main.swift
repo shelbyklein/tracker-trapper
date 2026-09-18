@@ -595,7 +595,7 @@ struct PlanCard: View {
                             .foregroundStyle(.white).frame(width: 26, height: 26).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .background(Color.red, in: RoundedRectangle(cornerRadius: 5))
+                    .background(Color.red.opacity(0.22), in: RoundedRectangle(cornerRadius: 5))
                     .help("Stop watching and remove this issue from Tracker Trapper")
                     .accessibilityLabel("Stop watching \(plan.repository) #\(plan.issueNumber) and remove its task list")
                 }
