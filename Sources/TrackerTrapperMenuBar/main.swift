@@ -1,13 +1,55 @@
 import SwiftUI
 import AppKit
+import Carbon.HIToolbox
 import TrackerTrapperCore
 
 @main
 struct TrackerTrapperMenuBar: App {
-    @StateObject private var model = MenuModel()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     var body: some Scene {
-        MenuBarExtra { MenuContent(model: model) } label: { Label(model.badge, systemImage: model.symbol) }
-            .menuBarExtraStyle(.window)
+        Settings { EmptyView() }
+    }
+}
+
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let model = MenuModel()
+    private let popover = NSPopover()
+    private var statusItem: NSStatusItem?
+    private var hotKey: EventHotKeyRef?
+    private var eventHandler: EventHandlerRef?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem?.button?.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Tracker Trapper")
+        statusItem?.button?.image?.isTemplate = true
+        statusItem?.button?.toolTip = "Tracker Trapper (⌘⇧T)"
+        statusItem?.button?.target = self; statusItem?.button?.action = #selector(togglePopover)
+        popover.behavior = .transient; popover.animates = true; popover.contentViewController = NSHostingController(rootView: MenuContent(model: model))
+        registerHotKey()
+    }
+
+    @objc private func togglePopover() {
+        guard let button = statusItem?.button else { return }
+        if popover.isShown { popover.performClose(nil) } else { model.refresh(); popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY); NSApp.activate(ignoringOtherApps: true) }
+    }
+
+    private func registerHotKey() {
+        let id = EventHotKeyID(signature: OSType(0x54545250), id: 1)
+        RegisterEventHotKey(UInt32(kVK_ANSI_T), UInt32(cmdKey | shiftKey), id, GetApplicationEventTarget(), 0, &hotKey)
+        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        let callback: EventHandlerUPP = { _, _, userData in
+            guard let userData else { return noErr }
+            let delegate = Unmanaged<AppDelegate>.fromOpaque(userData).takeUnretainedValue()
+            Task { @MainActor in delegate.togglePopover() }
+            return noErr
+        }
+        InstallEventHandler(GetApplicationEventTarget(), callback, 1, &eventType, Unmanaged.passUnretained(self).toOpaque(), &eventHandler)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if let hotKey { UnregisterEventHotKey(hotKey) }
+        if let eventHandler { RemoveEventHandler(eventHandler) }
     }
 }
 
