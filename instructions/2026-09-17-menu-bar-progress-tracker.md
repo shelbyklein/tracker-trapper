@@ -61,7 +61,7 @@ The GitHub tracking issue is the authoritative execution checklist for this plan
 ### Phase 1 — Prove the integration
 
 - [ ] **TT-01 — Verify actual client capabilities.** Record installed macOS/toolchain, Codex and Claude Code versions; test lifecycle and native plan/task hooks in disposable sessions. Check: a capability matrix identifies working events, missing events, setup/trust requirements, and fallback behavior for each tested client.
-- [ ] **TT-02 — Prove one issue-to-progress round trip.** Register a real test issue and three stable todos using a minimal collector/CLI; send start, complete, interruption and resume events. Check: issue identity and progress survive collector restart and duplicate event delivery; capture actual client evidence separately from fixtures. Use TT-01 results before choosing adapter paths.
+- [x] **TT-02 — Prove one issue-to-progress round trip.** Register a real test issue and three stable todos using a minimal collector/CLI; send start, complete, interruption and resume events. Check: issue identity and progress survive collector restart and duplicate event delivery; capture actual client evidence separately from fixtures. Use TT-01 results before choosing adapter paths. Evidence: issue #1 was imported with 16 stable IDs; a real temporary store ran TT-01 through start, complete-with-evidence, interruption and a new-session resume; restart/idempotency and duplicate-event tests passed. Codex and Claude lifecycle evidence was recorded separately from this fixture round trip.
 
 ### Phase 2 — Durable local core
 
