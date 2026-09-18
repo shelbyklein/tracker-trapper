@@ -29,6 +29,43 @@ function depart(){
 
  });
 }
+// The big bird stays on the ledge: short hops, a soft landing, then a pause.
+const hero=document.querySelector('.hero-bird');
+if(hero){
+ let hop=null,rest=null,inView=false;
+ function stopHopping(){
+  if(rest)rest.kill();if(hop)hop.kill();rest=null;hop=null;
+  gsap.set(hero,{clearProps:'transform,transformOrigin'});
+ }
+ function scheduleHop(){
+  if(motion.matches||document.hidden||!inView)return;
+  rest=gsap.delayedCall(1.8+Math.random()*3,()=>{
+   rest=null;
+   const width=hero.getBoundingClientRect().width;
+   const current=Number(gsap.getProperty(hero,'x'))||0;
+   // Stay close to the original perch, including on narrow screens.
+   const target=current < -width*.16 ? 0 : -width*(.2+Math.random()*.14);
+   const height=width*(.055+Math.random()*.035);
+   hop=gsap.timeline({onComplete:()=>{hop=null;scheduleHop()}});
+   hop.set(hero,{transformOrigin:'50% 90%'})
+    .to(hero,{scaleY:.94,scaleX:1.035,duration:.12,ease:'power1.in'})
+    .to(hero,{x:target,duration:.42,ease:'sine.inOut'},'takeoff')
+    .to(hero,{y:-height,scaleY:1.025,scaleX:.985,duration:.2,ease:'power2.out'},'takeoff')
+    .to(hero,{y:0,scaleY:.95,scaleX:1.025,duration:.22,ease:'power2.in'},'takeoff+=0.2')
+    .to(hero,{scaleX:1,scaleY:1,duration:.16,ease:'sine.out'});
+  });
+ }
+ function resume(){stopHopping();scheduleHop()}
+ const observer=new IntersectionObserver(entries=>{
+  inView=entries[0].isIntersecting;resume();
+ },{threshold:.25});
+ observer.observe(hero);
+ motion.addEventListener('change',resume);
+ document.addEventListener('visibilitychange',resume);
+ addEventListener('resize',resume);
+ addEventListener('pagehide',stopHopping);
+ addEventListener('pageshow',resume);
+}
 addEventListener('pointerdown',()=>{armed=true},{passive:true});
 addEventListener('wheel',()=>{armed=true},{passive:true});
 addEventListener('touchmove',()=>{armed=true},{passive:true});
