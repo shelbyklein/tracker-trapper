@@ -32,6 +32,37 @@ struct TrackerTrapperCLI {
             guard let repository = value(after: "--repo", in: args), let issue = value(after: "--issue", in: args), let issueNumber = Int(issue) else { throw CLIError.usage("import-issue requires --repo owner/name and --issue number") }
             let imported = try importIssue(repository: repository, issueNumber: issueNumber)
             try printJSON(await store.register(imported))
+        case "create-issue":
+            guard let repository = value(after: "--repo", in: args), let title = value(after: "--title", in: args), let bodyFile = value(after: "--body-file", in: args) else {
+                throw CLIError.usage("create-issue requires --repo, --title and --body-file")
+            }
+            let issueURL = try createIssue(repository: repository, title: title, bodyFile: bodyFile)
+            guard let issueNumber = Int(URL(string: issueURL)?.pathComponents.last ?? "") else {
+                throw CLIError.usage("GitHub created the issue but returned an unparseable URL: \(issueURL). Retry with import-issue --repo \(repository) --issue <number>")
+            }
+            do {
+                let imported = try importIssue(repository: repository, issueNumber: issueNumber)
+                let registered = try await store.register(imported)
+                try await store.clearRegistrationRetry(id: "github:\(repository)#\(issueNumber)")
+                try printJSON(registered)
+            } catch {
+                try await store.enqueueRegistrationRetry(RegistrationRetry(repository: repository, issueNumber: issueNumber, issueURL: issueURL, reason: error.localizedDescription))
+                throw CLIError.usage("GitHub issue created at \(issueURL), but local registration failed: \(error.localizedDescription). Retry with import-issue --repo \(repository) --issue \(issueNumber)")
+            }
+        case "retry-registrations":
+            let retries = await store.read().registrationRetries
+            var failures: [String] = []
+            for retry in retries {
+                do {
+                    let imported = try importIssue(repository: retry.repository, issueNumber: retry.issueNumber)
+                    _ = try await store.register(imported)
+                    try await store.clearRegistrationRetry(id: retry.id)
+                    print("registered \(retry.issueURL)")
+                } catch {
+                    failures.append("\(retry.repository)#\(retry.issueNumber): \(error.localizedDescription)")
+                }
+            }
+            if !failures.isEmpty { throw CLIError.usage("registration retries still pending: \(failures.joined(separator: "; "))") }
         case "get-plan":
             guard let id = value(after: "--plan-id", in: args) else { throw CLIError.usage("get-plan requires --plan-id") }
             let result = await store.read().plans.first { $0.id == id || "\($0.issueNumber)" == id }
@@ -80,6 +111,14 @@ struct TrackerTrapperCLI {
         }
         return Plan(id: "github:\(repository)#\(issueNumber)", repository: repository, issueNumber: issueNumber, issueURL: issue.url, title: issue.title, todos: todos)
     }
+    static func createIssue(repository: String, title: String, bodyFile: String) throws -> String {
+        let data = try runProcess("gh", arguments: ["issue", "create", "--repo", repository, "--title", title, "--body-file", bodyFile])
+        let output = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = output.split(whereSeparator: \ .isWhitespace).last.map(String.init), url.contains("/issues/") else {
+            throw CLIError.usage("gh issue create returned no issue URL: \(output)")
+        }
+        return url
+    }
     static func runProcess(_ executable: String, arguments: [String]) throws -> Data {
         let process = Process(); let output = Pipe(); process.executableURL = URL(fileURLWithPath: "/usr/bin/env"); process.arguments = [executable] + arguments; process.standardOutput = output; process.standardError = output
         try process.run(); let data = output.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit(); guard process.terminationStatus == 0 else { throw CLIError.usage(String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) }; return data
@@ -91,6 +130,8 @@ struct TrackerTrapperCLI {
     tracker-trapper — local plan/progress bridge
     register-plan --input plan.json
     import-issue --repo owner/name --issue 123
+    create-issue --repo owner/name --title "Title" --body-file plan.md
+    retry-registrations
     get-plan --plan-id <id>
     start-run --plan-id <id> --agent <name> --session-id <id> [--repo-path <path>]
     update-task --run-id <id> --todo-id <id> --status <pending|in_progress|blocked|completed|skipped> [--message <text>] [--evidence <value>] [--event-id <id>]

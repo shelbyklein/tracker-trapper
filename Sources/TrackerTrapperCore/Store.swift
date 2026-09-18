@@ -38,6 +38,14 @@ public actor TrackerStore {
         snapshot.plans.append(plan); try persist(); return plan
     }
 
+    public func enqueueRegistrationRetry(_ retry: RegistrationRetry) throws {
+        if !snapshot.registrationRetries.contains(where: { $0.id == retry.id }) { snapshot.registrationRetries.append(retry); try persist() }
+    }
+
+    public func clearRegistrationRetry(id: String) throws {
+        snapshot.registrationRetries.removeAll { $0.id == id }; try persist()
+    }
+
     public func startRun(planID: String, agent: String, sessionID: String, repositoryPath: String) throws -> Run {
         guard snapshot.plans.contains(where: { $0.id == planID }) else { throw StoreError.notFound("plan \(planID)") }
         let run = Run(planID: planID, agent: agent, sessionID: sessionID, repositoryPath: repositoryPath)

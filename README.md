@@ -12,6 +12,8 @@ swift run tracker-trapper --help
 swift run tracker-trapper-mcp
 swift run tracker-trapper register-plan --input plan.json
 swift run tracker-trapper import-issue --repo owner/name --issue 123
+swift run tracker-trapper create-issue --repo owner/name --title "Title" --body-file plan.md
+swift run tracker-trapper retry-registrations
 swift run tracker-trapper get-plan --plan-id <id>
 swift run TrackerTrapperMenuBar
 swift build -c release --product TrackerTrapperMenuBar
@@ -19,6 +21,8 @@ scripts/package-app.sh
 ```
 
 The store defaults to `~/Library/Application Support/TrackerTrapper/store.json`. Override it with `TRACKER_TRAPPER_STORE` for tests or separate environments. The CLI and stdio MCP server use the same actor-backed service and do not place credentials in the store.
+
+`create-issue` is explicit: it creates the GitHub issue, imports its stable `TT-xx` checklist, and registers it locally. If GitHub succeeds but local registration fails, the attempt is retained in the store and can be retried with `retry-registrations` or the printed `import-issue` command. Repeating registration for the same repository and issue is idempotent.
 
 To synchronize the tracker-owned checklist block for an issue, set `TT_TRACKER_TRAPPER_BIN` to the built CLI and run `Integrations/sync-github-issue.sh --repo owner/name --issue 123 --plan-id <id> --dry-run` first. The script uses `gh` authentication, changes only its marked block, preserves unrelated issue content, and refuses to overwrite a changed tracker block unless `--force` is supplied.
 

@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Carbon.HIToolbox
+import UserNotifications
 import TrackerTrapperCore
 
 @main
@@ -25,7 +26,7 @@ struct TrackerTrapperMenuBar: App {
         statusItem?.button?.image?.isTemplate = true
         statusItem?.button?.toolTip = "Tracker Trapper (⌘⇧T)"
         statusItem?.button?.target = self; statusItem?.button?.action = #selector(togglePopover)
-        popover.behavior = .transient; popover.animates = true; popover.contentViewController = NSHostingController(rootView: MenuContent(model: model))
+        popover.behavior = .applicationDefined; popover.animates = true; popover.contentViewController = NSHostingController(rootView: MenuContent(model: model))
         registerHotKey()
     }
 
@@ -56,11 +57,57 @@ struct TrackerTrapperMenuBar: App {
 @MainActor final class MenuModel: ObservableObject {
     @Published var snapshot = StoreSnapshot()
     @Published var error: String?
+    @Published private(set) var attentionItems: [String] = []
+    private var hasLoadedSnapshot = false
+    private var notificationPermissionRequested = false
+    private var dismissedAttentionKeys = Set<String>()
     let store: TrackerStore?
     init() { store = try? TrackerStore(); refresh() }
     var badge: String { let count = snapshot.plans.reduce(0) { $0 + $1.todos.filter { $0.status == .inProgress }.count }; return count == 0 ? "Tracker Trapper" : "\(count)" }
     var symbol: String { snapshot.plans.contains { plan in plan.todos.contains { $0.status == .blocked } } ? "exclamationmark.circle.fill" : "checklist" }
-    func refresh() { guard let store else { error = "Unable to open local store"; return }; Task { snapshot = await store.read() } }
+    func refresh() {
+        guard let store else { error = "Unable to open local store"; return }
+        Task { @MainActor in
+            let next = await store.read()
+            let oldKeys = Set(attentionKeys(for: snapshot))
+            let newKeys = Set(attentionKeys(for: next))
+            snapshot = next
+            attentionItems = Array(newKeys.subtracting(dismissedAttentionKeys)).sorted()
+            if hasLoadedSnapshot { notify(for: newKeys.subtracting(oldKeys)) }
+            hasLoadedSnapshot = true
+        }
+    }
+    func dismissAttention(_ item: String) { dismissedAttentionKeys.insert(item); attentionItems.removeAll { $0 == item } }
+    private func attentionKeys(for snapshot: StoreSnapshot) -> [String] {
+        let now = Date()
+        var result: [String] = []
+        for run in snapshot.runs {
+            switch run.status {
+            case .waitingForUser: result.append("\(run.id):waiting_for_user")
+            case .interrupted: result.append("\(run.id):interrupted")
+            case .failed: result.append("\(run.id):failed")
+            case .active where now.timeIntervalSince(run.lastActivityAt) > 15 * 60: result.append("\(run.id):stale")
+            default: break
+            }
+        }
+        for plan in snapshot.plans where !plan.todos.isEmpty && plan.todos.allSatisfy({ $0.status == .completed || $0.status == .skipped }) { result.append("\(plan.id):complete") }
+        return result
+    }
+    private func notify(for keys: Set<String>) {
+        let newKeys = keys.subtracting(dismissedAttentionKeys)
+        guard !newKeys.isEmpty else { return }
+        if notificationPermissionRequested { deliverNotification(); return }
+        notificationPermissionRequested = true
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
+            guard granted else { return }
+            Task { @MainActor in self?.deliverNotification() }
+        }
+    }
+    private func deliverNotification() {
+        let content = UNMutableNotificationContent(); content.title = "Tracker Trapper"; content.body = "Agent progress needs your attention."; content.sound = .default
+        let request = UNNotificationRequest(identifier: "tracker-trapper-\(UUID().uuidString)", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
 }
 
 struct MenuContent: View {
@@ -69,12 +116,29 @@ struct MenuContent: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack { Text("Tracker Trapper").font(.headline); Spacer(); Button("Refresh") { model.refresh() }.keyboardShortcut("r") }
             if let error = model.error { Text(error).foregroundStyle(.red) }
+            ForEach(model.attentionItems, id: \.self) { item in
+                HStack(alignment: .top) {
+                    Label(attentionLabel(item), systemImage: "exclamationmark.circle.fill").foregroundStyle(.orange)
+                    Spacer()
+                    Button("Dismiss") { model.dismissAttention(item) }.buttonStyle(.borderless)
+                }.font(.caption).accessibilityElement(children: .combine)
+            }
             ScrollView {
                 if model.snapshot.plans.isEmpty { Text("No registered plans yet.").foregroundStyle(.secondary); Text("Use tracker-trapper register-plan to connect an issue.").font(.caption).foregroundStyle(.secondary) }
                 ForEach(model.snapshot.plans) { plan in PlanCard(plan: plan, runs: model.snapshot.runs.filter { $0.planID == plan.id }) }
             }.frame(maxHeight: 520)
             Divider(); Text(model.snapshot.outbox.isEmpty ? "Synced or no pending updates." : "\(model.snapshot.outbox.count) update(s) saved locally; GitHub sync pending.").font(.caption).foregroundStyle(.secondary)
         }.padding(16).frame(width: 420)
+    }
+    func attentionLabel(_ key: String) -> String {
+        switch key.split(separator: ":").last.map(String.init) {
+        case "waiting_for_user": return "Waiting for your input"
+        case "interrupted": return "Agent interrupted"
+        case "failed": return "Agent failed"
+        case "stale": return "No agent activity for 15 minutes"
+        case "complete": return "Plan complete"
+        default: return "Agent attention needed"
+        }
     }
 }
 
@@ -88,6 +152,7 @@ struct PlanCard: View {
             ProgressView(value: Double(completed), total: Double(max(plan.todos.count, 1)))
             ForEach(plan.todos) { todo in HStack(alignment: .top) { Image(systemName: icon(for: todo.status)).foregroundStyle(color(for: todo.status)); Text(todo.description).fixedSize(horizontal: false, vertical: true) }.accessibilityElement(children: .ignore).accessibilityLabel("\(todo.status.rawValue): \(todo.description)") }
             if let todo = plan.todos.first(where: { $0.status == .blocked }) { Label("Blocked: \(todo.description)", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange) }
+            ForEach(attentionStates, id: \.self) { state in Label(state, systemImage: "bell.badge.fill").font(.caption).foregroundStyle(.orange) }
             if let evidence = plan.todos.flatMap(\.evidence).last { Text("Evidence: \(evidence)").font(.caption).lineLimit(2).foregroundStyle(.secondary) }
             if let run = runs.sorted(by: { $0.lastActivityAt > $1.lastActivityAt }).first {
                 VStack(alignment: .leading, spacing: 2) {
@@ -97,6 +162,17 @@ struct PlanCard: View {
             }
             Button("Open GitHub issue") { NSWorkspace.shared.open(URL(string: plan.issueURL)!) }.buttonStyle(.link).font(.caption)
         }.padding(10).background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+    }
+    var attentionStates: [String] {
+        runs.compactMap { run in
+            switch run.status {
+            case .waitingForUser: return "Waiting for your input"
+            case .interrupted: return "Agent interrupted"
+            case .failed: return "Agent failed"
+            case .active where Date().timeIntervalSince(run.lastActivityAt) > 15 * 60: return "Stale: no activity for 15 minutes"
+            default: return nil
+            }
+        }
     }
     func icon(for status: TodoStatus) -> String { switch status { case .completed: "checkmark.circle.fill"; case .inProgress: "circle.inset.filled"; case .blocked: "exclamationmark.triangle.fill"; case .skipped: "minus.circle"; case .pending: "circle" } }
     func color(for status: TodoStatus) -> Color { switch status { case .completed: .green; case .inProgress: .blue; case .blocked: .orange; case .skipped: .secondary; case .pending: .secondary } }

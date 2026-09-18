@@ -76,14 +76,38 @@ public struct ProgressEvent: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+public struct RegistrationRetry: Codable, Identifiable, Equatable, Sendable {
+    public let id: String
+    public let repository: String
+    public let issueNumber: Int
+    public let issueURL: String
+    public let reason: String
+    public let createdAt: Date
+
+    public init(repository: String, issueNumber: Int, issueURL: String, reason: String, createdAt: Date = .now) {
+        self.id = "github:\(repository)#\(issueNumber)"; self.repository = repository; self.issueNumber = issueNumber
+        self.issueURL = issueURL; self.reason = reason; self.createdAt = createdAt
+    }
+}
+
 public struct StoreSnapshot: Codable, Equatable, Sendable {
     public var plans: [Plan]
     public var runs: [Run]
     public var events: [ProgressEvent]
     public var outbox: [ProgressEvent]
+    public var registrationRetries: [RegistrationRetry]
     public var schemaVersion: Int
 
-    public init(plans: [Plan] = [], runs: [Run] = [], events: [ProgressEvent] = [], outbox: [ProgressEvent] = [], schemaVersion: Int = 1) {
-        self.plans = plans; self.runs = runs; self.events = events; self.outbox = outbox; self.schemaVersion = schemaVersion
+    public init(plans: [Plan] = [], runs: [Run] = [], events: [ProgressEvent] = [], outbox: [ProgressEvent] = [], registrationRetries: [RegistrationRetry] = [], schemaVersion: Int = 1) {
+        self.plans = plans; self.runs = runs; self.events = events; self.outbox = outbox; self.registrationRetries = registrationRetries; self.schemaVersion = schemaVersion
+    }
+
+    private enum CodingKeys: String, CodingKey { case plans, runs, events, outbox, registrationRetries, schemaVersion }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        plans = try values.decode([Plan].self, forKey: .plans); runs = try values.decode([Run].self, forKey: .runs)
+        events = try values.decode([ProgressEvent].self, forKey: .events); outbox = try values.decode([ProgressEvent].self, forKey: .outbox)
+        registrationRetries = try values.decodeIfPresent([RegistrationRetry].self, forKey: .registrationRetries) ?? []
+        schemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
     }
 }
