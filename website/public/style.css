@@ -60,3 +60,10 @@ Text Domain: tracker-trapper
 @media(max-width:900px){.perch-bird-0{right:220px}.perch-bird-1{right:310px}.perch-bird-2{right:375px}}
 @media(max-width:640px){.perch-bird-0{left:0;right:auto;width:62px;height:62px;top:-53px}.perch-bird-1{left:52px;right:auto;width:50px;height:50px;top:-43px}.perch-bird-2{left:94px;right:auto;width:55px;height:55px;top:-47px}}
 @media(max-width:370px){.perch-bird-2{display:none}}
+/* Keep flights in their original container; clip only at the page's sides. */
+body{overflow-x:clip}
+.perch-bird-0{filter:hue-rotate(105deg)}
+.perch-bird-1{filter:hue-rotate(-16deg)}
+.perch-bird-2{filter:hue-rotate(87deg)}
+.perch-bird-3{filter:hue-rotate(18deg)}
+.perch-bird-4{filter:hue-rotate(122deg)}

@@ -1,24 +1,31 @@
 (()=>{
 const perch=document.querySelector('.perch-friends');if(!perch||!window.gsap||!window.MotionPathPlugin)return;
-gsap.registerPlugin(MotionPathPlugin);const motion=matchMedia('(prefers-reduced-motion: reduce)');let departed=false,armed=false,timeline=null,layer=null;let initialY=scrollY;
-const birds=[document.querySelector('.hero-bird'),...perch.querySelectorAll('img')].filter(Boolean);
-function cleanup(){if(timeline)timeline.kill();timeline=null;if(layer)layer.remove();layer=null;}
-function depart(){if(departed||motion.matches)return;departed=true;
- const visible=birds.map(el=>({el,r:el.getBoundingClientRect()})).filter(({el,r})=>getComputedStyle(el).display!=='none'&&r.bottom>0&&r.top<innerHeight);
- if(!visible.length){departed=false;return}layer=document.createElement('div');layer.className='checkmark-flock';layer.setAttribute('aria-hidden','true');document.body.append(layer);
- timeline=gsap.timeline({onComplete:cleanup});
- visible.forEach(({el,r},i)=>{const img=document.createElement('img');img.src=perch.dataset.flightSrc;img.alt='';img.style.filter=getComputedStyle(el).filter;img.width=r.width;img.height=r.height;layer.append(img);el.style.visibility='hidden';
- const y=Math.max(25,r.top),endY=Math.max(20,y-120-Math.random()*150),endX=innerWidth+r.width+50;
- gsap.set(img,{x:r.left,y,scaleX:-1});
- const path=`M ${r.left} ${y} C ${r.left+80} ${Math.max(10,y-90)} ${innerWidth*.8} ${endY+70} ${endX} ${endY}`;
- timeline.to(img,{duration:5.5+Math.random()*1.5,ease:'power1.inOut',motionPath:{path,autoRotate:true}},i*.10);
+gsap.registerPlugin(MotionPathPlugin);
+const motion=matchMedia('(prefers-reduced-motion: reduce)');
+const birds=[...perch.querySelectorAll('img')];
+let departed=false,armed=false,timeline=null,initialY=scrollY;
+function cleanup(){if(timeline)timeline.kill();timeline=null;}
+function depart(){
+ if(departed||motion.matches)return;
+ const visible=birds.filter(el=>{const r=el.getBoundingClientRect();return getComputedStyle(el).display!=='none'&&r.bottom>0&&r.top<innerHeight});
+ if(!visible.length)return;
+ departed=true;timeline=gsap.timeline({onComplete:()=>{visible.forEach(el=>el.style.visibility='hidden');timeline=null}});
+ visible.forEach((el,i)=>{
+  const r=el.getBoundingClientRect(),distance=innerWidth-r.left+r.width+60;
+  const rise=150+Math.random()*180,duration=5.5+Math.random()*1.5,delay=i*.13;
+  // Animate the actual perched element from transform (0,0). Its containing
+  // block never changes, so scrolling moves the bird and showcase together.
+  const path=`M 0 0 C ${distance*.16} ${-rise*.7} ${distance*.64} ${-rise-50} ${distance} ${-rise}`;
+  timeline.to(el,{duration,ease:'power1.inOut',motionPath:{path,autoRotate:false}},delay);
+  timeline.to(el,{opacity:0,duration:.45,ease:'none'},delay+duration-.45);
  });
 }
-// Arm only on intentional scrolling, not anchor restoration or initial page layout.
 addEventListener('pointerdown',()=>{armed=true},{passive:true});
-addEventListener('wheel',()=>{armed=true},{passive:true});addEventListener('touchmove',()=>{armed=true},{passive:true});addEventListener('keydown',e=>{if(['ArrowDown','ArrowUp','PageDown','PageUp',' ','Home','End'].includes(e.key))armed=true});
+addEventListener('wheel',()=>{armed=true},{passive:true});
+addEventListener('touchmove',()=>{armed=true},{passive:true});
+addEventListener('keydown',e=>{if(['ArrowDown','ArrowUp','PageDown','PageUp',' ','Home','End'].includes(e.key))armed=true});
 addEventListener('scroll',()=>{if(armed&&Math.abs(scrollY-initialY)>6)depart()},{passive:true});
 setTimeout(()=>{initialY=scrollY},250);
-motion.addEventListener('change',()=>{if(motion.matches){cleanup();birds.forEach(el=>el.style.visibility='')}});
+motion.addEventListener('change',()=>{if(motion.matches){cleanup();gsap.set(birds,{clearProps:'transform,opacity,visibility'});departed=false}});
 addEventListener('pagehide',cleanup);
 })();
