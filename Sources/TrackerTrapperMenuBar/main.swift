@@ -20,10 +20,6 @@ struct TrackerTrapperMenuBar: App {
     private var hotKey: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
     private var refreshTimer: Timer?
-    private var chromeClickMonitor: Any?
-    private var externalChromeClickMonitor: Any?
-    private var pointerExitTimer: Timer?
-    private var pointerEnteredPanel = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -37,36 +33,12 @@ struct TrackerTrapperMenuBar: App {
         statusItem?.button?.image?.isTemplate = true
         statusItem?.button?.toolTip = "Tracker Trapper (⌘⇧T)"
         statusItem?.button?.target = self; statusItem?.button?.action = #selector(togglePopover)
-        popover.behavior = .applicationDefined; popover.animates = true; popover.contentViewController = NSHostingController(rootView: MenuContent(model: model, onHeightChange: { [weak self] height in
+        popover.behavior = .transient; popover.animates = true; popover.contentViewController = NSHostingController(rootView: MenuContent(model: model, onHeightChange: { [weak self] height in
             guard let self, abs(self.popover.contentSize.height - height) > 0.5 else { return }
             self.popover.contentSize = NSSize(width: 420, height: height)
-            self.pointerEnteredPanel = false
         }))
         popover.delegate = self
         registerHotKey()
-        // The native arrow is window chrome, outside the SwiftUI content.
-        // Observe clicks in that top strip without relying on private AppKit views.
-        chromeClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-            guard let self, self.popover.isShown,
-                  let content = self.popover.contentViewController?.view,
-                  let window = content.window, event.window === window else { return event }
-            // Hosting views can extend underneath the native arrow. Reserve the
-            // top 22 points (arrow + upper padding), above all header controls.
-            let point = event.locationInWindow
-            if point.y >= window.frame.height - 22 {
-                self.popover.performClose(nil)
-                return nil
-            }
-            return event
-        }
-        // AppKit can route arrow clicks to the application behind the popover.
-        externalChromeClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
-            guard let self, self.popover.isShown,
-                  let window = self.popover.contentViewController?.view.window else { return }
-            let frame = window.frame
-            let topStrip = NSRect(x: frame.minX, y: frame.maxY - 22, width: frame.width, height: 22)
-            if topStrip.contains(NSEvent.mouseLocation) { self.popover.performClose(nil) }
-        }
     }
 
     @objc private func togglePopover() {
@@ -101,39 +73,14 @@ struct TrackerTrapperMenuBar: App {
 
     func popoverDidShow(_ notification: Notification) {
         model.panelDidOpen()
-        pointerExitTimer?.invalidate()
-        pointerEnteredPanel = false
-        // Read the full window frame, including the arrow, across applications.
-        // This needs no global event-monitor or accessibility permission.
-        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, self.popover.isShown,
-                      let window = self.popover.contentViewController?.view.window else { return }
-                // Keep native file pickers usable while linking a session.
-                guard NSApp.modalWindow == nil, window.attachedSheet == nil else { return }
-                if window.frame.contains(NSEvent.mouseLocation) {
-                    self.pointerEnteredPanel = true
-                } else if self.pointerEnteredPanel {
-                    self.popover.performClose(nil)
-                }
-            }
-        }
-        pointerExitTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
     }
 
     func popoverDidClose(_ notification: Notification) {
         model.panelDidClose()
-        pointerExitTimer?.invalidate()
-        pointerExitTimer = nil
-        pointerEnteredPanel = false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         refreshTimer?.invalidate()
-        pointerExitTimer?.invalidate()
-        if let chromeClickMonitor { NSEvent.removeMonitor(chromeClickMonitor) }
-        if let externalChromeClickMonitor { NSEvent.removeMonitor(externalChromeClickMonitor) }
         if let hotKey { UnregisterEventHotKey(hotKey) }
         if let eventHandler { RemoveEventHandler(eventHandler) }
     }

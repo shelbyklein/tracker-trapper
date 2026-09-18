@@ -285,7 +285,7 @@ and reconnect its MCP clients after updating.
 - The panel fits its content and scrolls only at the available-height limit.
 - Every reveal starts issue cards in remaining-only mode. Click an issue name
   to toggle all tasks; completed and skipped tasks are hidden in minimized mode.
-- After the pointer enters the panel, moving it outside dismisses the panel.
+- Click outside the panel to dismiss it. Moving the pointer outside keeps it open.
 - A bell icon shows grouped notices. Click it for details and dismissal controls.
 - Beside the task count, the GitHub icon opens the issue and the red **×**
   (**Stop watching**) stops its watchers and removes its card persistently.
