@@ -287,7 +287,7 @@ and reconnect its MCP clients after updating.
   to toggle all tasks; completed and skipped tasks are hidden in minimized mode.
 - Click outside the panel to dismiss it. Moving the pointer outside keeps it open.
 - A bell icon shows grouped notices. Click it for details and dismissal controls.
-- Beside the task count, the GitHub icon opens the issue and the red **×**
+- Beside the task count, the GitHub icon opens the issue and the white **×** on a red button
   (**Stop watching**) stops its watchers and removes its card persistently.
   Starting a new run for that issue brings it back; stored history is retained.
 - An explicitly selected next task gets a filled blue dot. The selection is not
@@ -299,6 +299,24 @@ and reconnect its MCP clients after updating.
   task card, then dismisses it. Existing completed imports do not trigger a party.
 - GitHub refresh imports missing stable checklist IDs and checked pending tasks,
   preserving historical evidence and local completed work.
+
+### Stages and session buttons
+
+Group stable-ID todos under Markdown headings such as `## Stage A — Design`,
+`## Phase B — Build`, or `## C: Release`. TT preserves those groups when importing
+and refreshing GitHub checklists. Subheadings within a stage retain its group;
+another heading at the same or higher level ends it. Each todo is counted once.
+Existing flat checklists continue to work.
+
+Click a stage title to switch between remaining tasks and all its tasks. Once
+all its todos are completed or skipped, the stage collapses to a checked title.
+You can expand it to review the finished tasks. The parent issue toggle also
+switches its stages between remaining-only and all-task views.
+
+Linked sessions have Claude or OpenAI/GPT icon buttons beside the GitHub icon.
+Click one to reveal that session's JSONL file in Finder; hover for its session ID.
+This is file access, not a deep link into the provider's conversation UI. Buttons
+appear only for explicitly linked sessions; use **Link session…** to add one.
 
 ### Select the next immediate task
 

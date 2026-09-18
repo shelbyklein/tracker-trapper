@@ -14,10 +14,12 @@ public struct Todo: Codable, Identifiable, Equatable, Sendable {
     public var acceptance: String
     public var status: TodoStatus
     public var parentID: String?
+    public var stage: String?
     public var evidence: [String]
     public var revision: Int
 
-    public init(id: String, description: String, acceptance: String = "", status: TodoStatus = .pending, parentID: String? = nil, evidence: [String] = [], revision: Int = 0) {
+    public init(id: String, description: String, acceptance: String = "", status: TodoStatus = .pending, parentID: String? = nil, evidence: [String] = [], revision: Int = 0, stage: String? = nil) {
+        self.stage = stage
         self.id = id; self.description = description; self.acceptance = acceptance; self.status = status
         self.parentID = parentID; self.evidence = evidence; self.revision = revision
     }

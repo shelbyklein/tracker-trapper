@@ -61,6 +61,7 @@ public actor TrackerStore {
             for incoming in todos {
                 if let todoIndex = plan.todos.firstIndex(where: { $0.id == incoming.id }) {
                     plan.todos[todoIndex].description = incoming.description
+                    plan.todos[todoIndex].stage = incoming.stage
                     if !incoming.acceptance.isEmpty { plan.todos[todoIndex].acceptance = incoming.acceptance }
                     if incoming.status == .completed && plan.todos[todoIndex].status == .pending {
                         plan.todos[todoIndex].status = .completed

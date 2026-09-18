@@ -535,6 +535,7 @@ struct MenuContent: View {
 
 struct PlanCard: View {
     @State private var showsRemainingOnly = true
+    @State private var expandedStages: Set<String> = []
     let plan: Plan; let runs: [Run]
     let watches: [SessionWatch]
     let onLink: (Run) -> Void
@@ -543,6 +544,11 @@ struct PlanCard: View {
     var visibleTodos: [Todo] {
         showsRemainingOnly ? plan.todos.filter { $0.status != .completed && $0.status != .skipped } : plan.todos
     }
+    var stages: [String] {
+        var seen: Set<String> = []
+        return plan.todos.compactMap(\.stage).filter { seen.insert($0).inserted }
+    }
+    var linkedSessions: [SessionWatch] { watches.filter { watch in runs.contains { $0.id == watch.runID } } }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -568,13 +574,28 @@ struct PlanCard: View {
                     .help("Open issue on GitHub")
                     .accessibilityLabel("Open \(plan.repository) #\(plan.issueNumber) on GitHub")
                 }
-                Group {
-                    Button { onUnlink(plan.id) } label: {
-                        Image(systemName: "xmark").font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.red).frame(width: 26, height: 26).contentShape(Rectangle())
+                ForEach(linkedSessions) { watch in
+                    Button {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: watch.sourcePath)])
+                    } label: {
+                        Group {
+                            if watch.format == .claude { ClaudeMark().fill(Color.orange) }
+                            else { OpenAIMark().fill(Color.primary) }
+                        }.frame(width: 16, height: 16)
+                            .frame(width: 26, height: 26).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 5))
+                    .help("Reveal \(watch.format == .claude ? "Claude" : "Codex / GPT") session file: \(watch.sessionID)")
+                    .accessibilityLabel("Reveal \(watch.format == .claude ? "Claude" : "Codex / GPT") session \(watch.sessionID) in Finder")
+                }
+                Group {
+                    Button { onUnlink(plan.id) } label: {
+                        Image(systemName: "xmark").font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white).frame(width: 26, height: 26).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(Color.red, in: RoundedRectangle(cornerRadius: 5))
                     .help("Stop watching and remove this issue from Tracker Trapper")
                     .accessibilityLabel("Stop watching \(plan.repository) #\(plan.issueNumber) and remove its task list")
                 }
@@ -588,18 +609,52 @@ struct PlanCard: View {
                         .accessibilityLabel("Link \(run.agent) session")
                 }
             }
-            ForEach(visibleTodos) { todo in
-                let isNext = plan.nextTodo?.id == todo.id
-                HStack(alignment: .top) {
-                    Image(systemName: isNext ? "circle.fill" : icon(for: todo.status))
-                        .foregroundStyle(isNext ? .blue : color(for: todo.status))
-                        .help(isNext ? "Next task" : todo.status.rawValue)
-                    Text(todo.description).fixedSize(horizontal: false, vertical: true)
+            ForEach(visibleTodos.filter { $0.stage == nil }) { todo in
+                todoRow(todo)
+            }
+            ForEach(stages, id: \.self) { stage in
+                let todos = plan.todos.filter { $0.stage == stage }
+                let done = todos.allSatisfy { $0.status == .completed || $0.status == .skipped }
+                let expanded = expandedStages.contains(stage)
+                VStack(alignment: .leading, spacing: 6) {
+                    Button {
+                        if expanded { expandedStages.remove(stage) } else { expandedStages.insert(stage) }
+                    } label: {
+                        HStack {
+                            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            Image(systemName: done ? "checkmark.square.fill" : "square")
+                                .foregroundStyle(done ? .green : .secondary)
+                            Text(stage).font(.subheadline.bold())
+                            Spacer()
+                            Text("\(todos.filter { $0.status == .completed || $0.status == .skipped }.count)/\(todos.count)")
+                                .monospacedDigit().foregroundStyle(.secondary)
+                        }.contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                    .accessibilityLabel("\(stage), \(done ? "complete" : "incomplete")")
+                    .accessibilityValue(expanded ? "All tasks" : "Remaining tasks only")
+                    ForEach(expanded ? todos : todos.filter { $0.status != .completed && $0.status != .skipped }) { todo in
+                        todoRow(todo).padding(.leading, 18)
+                    }
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(isNext ? "Next task, " : "")\(todo.status.rawValue): \(todo.description)")
+                .onChange(of: done) { complete in
+                    if complete { expandedStages.remove(stage) }
+                }
             }
         }.padding(10).background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+        .onChange(of: showsRemainingOnly) { remainingOnly in
+            expandedStages = remainingOnly ? [] : Set(stages)
+        }
+    }
+    private func todoRow(_ todo: Todo) -> some View {
+        let isNext = plan.nextTodo?.id == todo.id
+        return HStack(alignment: .top) {
+            Image(systemName: isNext ? "circle.fill" : icon(for: todo.status))
+                .foregroundStyle(isNext ? .blue : color(for: todo.status))
+                .help(isNext ? "Next task" : todo.status.rawValue)
+            Text(todo.description).fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(isNext ? "Next task, " : "")\(todo.status.rawValue): \(todo.description)")
     }
     func icon(for status: TodoStatus) -> String { switch status { case .completed: "checkmark.circle.fill"; case .inProgress: "circle.inset.filled"; case .blocked: "exclamationmark.triangle.fill"; case .skipped: "minus.circle"; case .pending: "circle" } }
     func color(for status: TodoStatus) -> Color { switch status { case .completed: .green; case .inProgress: .blue; case .blocked: .orange; case .skipped: .secondary; case .pending: .secondary } }
@@ -696,5 +751,273 @@ private struct GitHubMark: Shape {
         path.addCurve(to: CGPoint(x: 6.766, y: 11.328), control1: CGPoint(x: 6.375, y: 11.719), control2: CGPoint(x: 6.579, y: 11.484))
         path.closeSubpath()
         return path.applying(CGAffineTransform(scaleX: rect.width / 16, y: rect.height / 16))
+    }
+}
+
+
+// Simple Icons v14 (CC0): https://github.com/simple-icons/simple-icons/tree/14.0.0
+struct OpenAIMark: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: 22.2819000, y: 9.8211000))
+        path.addCurve(to: CGPoint(x: 21.7662000, y: 4.9103000), control1: CGPoint(x: 22.8247763, y: 8.1862353), control2: CGPoint(x: 22.6368537, y: 6.3967250))
+        path.addCurve(to: CGPoint(x: 15.2564000, y: 2.0103000), control1: CGPoint(x: 20.4570885, y: 2.6316330), control2: CGPoint(x: 17.8259794, y: 1.4595208))
+        path.addCurve(to: CGPoint(x: 9.4919809, y: 0.1310784), control1: CGPoint(x: 13.8083290, y: 0.3995277), control2: CGPoint(x: 11.6111651, y: -0.3167557))
+        path.addCurve(to: CGPoint(x: 4.9807000, y: 4.1818000), control1: CGPoint(x: 7.3727967, y: 0.5789124), control2: CGPoint(x: 5.6532786, y: 2.1228840))
+        path.addCurve(to: CGPoint(x: 0.9830000, y: 7.0818000), control1: CGPoint(x: 3.2928034, y: 4.5279192), control2: CGPoint(x: 1.8359752, y: 5.5847273))
+        path.addCurve(to: CGPoint(x: 1.7257000, y: 14.1784000), control1: CGPoint(x: -0.3404341, y: 9.3568411), control2: CGPoint(x: -0.0400906, y: 12.2266640))
+        path.addCurve(to: CGPoint(x: 2.2367000, y: 19.0891000), control1: CGPoint(x: 1.1808155, y: 15.8124986), control2: CGPoint(x: 1.3670487, y: 17.6021959))
+        path.addCurve(to: CGPoint(x: 8.7513000, y: 21.9892000), control1: CGPoint(x: 3.5474532, y: 21.3685811), control2: CGPoint(x: 6.1803050, y: 22.5406460))
+        path.addCurve(to: CGPoint(x: 13.2599000, y: 24.0000000), control1: CGPoint(x: 9.8948383, y: 23.2769626), control2: CGPoint(x: 11.5377157, y: 24.0096730))
+        path.addCurve(to: CGPoint(x: 19.0317000, y: 19.7942000), control1: CGPoint(x: 15.8937384, y: 24.0024236), control2: CGPoint(x: 18.2271138, y: 22.3021377))
+        path.addCurve(to: CGPoint(x: 23.0294000, y: 16.8941000), control1: CGPoint(x: 20.7193622, y: 19.4474844), control2: CGPoint(x: 22.1759797, y: 18.3907928))
+        path.addCurve(to: CGPoint(x: 22.2819000, y: 9.8212000), control1: CGPoint(x: 24.3368029, y: 14.6230652), control2: CGPoint(x: 24.0351465, y: 11.7687699))
+        path.addLine(to: CGPoint(x: 22.2819000, y: 9.8211000))
+        path.closeSubpath()
+        path.move(to: CGPoint(x: 13.2599000, y: 22.4292000))
+        path.addCurve(to: CGPoint(x: 10.3835000, y: 21.3884000), control1: CGPoint(x: 12.2086176, y: 22.4308640), control2: CGPoint(x: 11.1903011, y: 22.0623951))
+        path.addLine(to: CGPoint(x: 10.5254000, y: 21.3080000))
+        path.addLine(to: CGPoint(x: 15.3037000, y: 18.5498000))
+        path.addCurve(to: CGPoint(x: 15.6964000, y: 17.8685000), control1: CGPoint(x: 15.5456463, y: 18.4079018), control2: CGPoint(x: 15.6948865, y: 18.1489832))
+        path.addLine(to: CGPoint(x: 15.6964000, y: 11.1316000))
+        path.addLine(to: CGPoint(x: 17.7164000, y: 12.3002000))
+        path.addCurve(to: CGPoint(x: 17.7544000, y: 12.3522000), control1: CGPoint(x: 17.7366519, y: 12.3104610), control2: CGPoint(x: 17.7507756, y: 12.3297881))
+        path.addLine(to: CGPoint(x: 17.7544000, y: 17.9348000))
+        path.addCurve(to: CGPoint(x: 13.2599000, y: 22.4292000), control1: CGPoint(x: 17.7491194, y: 20.4148370), control2: CGPoint(x: 15.7399371, y: 22.4239746))
+        path.addLine(to: CGPoint(x: 13.2599000, y: 22.4292000))
+        path.closeSubpath()
+        path.move(to: CGPoint(x: 3.5992000, y: 18.3038000))
+        path.addCurve(to: CGPoint(x: 3.0646000, y: 15.2901000), control1: CGPoint(x: 3.0719725, y: 17.3934203), control2: CGPoint(x: 2.8826720, y: 16.3262767))
+        path.addLine(to: CGPoint(x: 3.2066000, y: 15.3753000))
+        path.addLine(to: CGPoint(x: 7.9896000, y: 18.1335000))
+        path.addCurve(to: CGPoint(x: 8.7702000, y: 18.1335000), control1: CGPoint(x: 8.2305873, y: 18.2749092), control2: CGPoint(x: 8.5292127, y: 18.2749092))
+        path.addLine(to: CGPoint(x: 14.6130000, y: 14.7650000))
+        path.addLine(to: CGPoint(x: 14.6130000, y: 17.0974000))
+        path.addCurve(to: CGPoint(x: 14.5798000, y: 17.1589000), control1: CGPoint(x: 14.6118880, y: 17.1218894), control2: CGPoint(x: 14.5996639, y: 17.1445335))
+        path.addLine(to: CGPoint(x: 9.7400000, y: 19.9502000))
+        path.addCurve(to: CGPoint(x: 3.5992000, y: 18.3038000), control1: CGPoint(x: 7.5893410, y: 21.1891380), control2: CGPoint(x: 4.8416181, y: 20.4524504))
+        path.addLine(to: CGPoint(x: 3.5992000, y: 18.3038000))
+        path.closeSubpath()
+        path.move(to: CGPoint(x: 2.3408000, y: 7.8956000))
+        path.addCurve(to: CGPoint(x: 4.7063000, y: 5.9228000), control1: CGPoint(x: 2.8716834, y: 6.9793690), control2: CGPoint(x: 3.7096324, y: 6.2805291))
+        path.addLine(to: CGPoint(x: 4.7063000, y: 11.6000000))
+        path.addCurve(to: CGPoint(x: 5.0942000, y: 12.2765000), control1: CGPoint(x: 4.7026368, y: 11.8793443), control2: CGPoint(x: 4.8512652, y: 12.1385531))
+        path.addLine(to: CGPoint(x: 10.9086000, y: 15.6308000))
+        path.addLine(to: CGPoint(x: 8.8885000, y: 16.7993000))
+        path.addCurve(to: CGPoint(x: 8.8175000, y: 16.7993000), control1: CGPoint(x: 8.8663009, y: 16.8110869), control2: CGPoint(x: 8.8396991, y: 16.8110869))
+        path.addLine(to: CGPoint(x: 3.9872000, y: 14.0128000))
+        path.addCurve(to: CGPoint(x: 2.3408000, y: 7.8720000), control1: CGPoint(x: 1.8408159, y: 12.7686447), control2: CGPoint(x: 1.1046934, y: 10.0230294))
+        path.addLine(to: CGPoint(x: 2.3408000, y: 7.8956000))
+        path.closeSubpath()
+        path.move(to: CGPoint(x: 18.9371000, y: 11.7514000))
+        path.addLine(to: CGPoint(x: 13.1038000, y: 8.3640000))
+        path.addLine(to: CGPoint(x: 15.1192000, y: 7.2000000))
+        path.addCurve(to: CGPoint(x: 15.1902000, y: 7.2000000), control1: CGPoint(x: 15.1413991, y: 7.1882131), control2: CGPoint(x: 15.1680009, y: 7.1882131))
+        path.addLine(to: CGPoint(x: 20.0205000, y: 9.9913000))
+        path.addCurve(to: CGPoint(x: 22.2531057, y: 14.2580028), control1: CGPoint(x: 21.5281238, y: 10.8612194), control2: CGPoint(x: 22.3978992, y: 12.5234354))
+        path.addCurve(to: CGPoint(x: 19.3440000, y: 18.0955000), control1: CGPoint(x: 22.1083123, y: 15.9925702), control2: CGPoint(x: 20.9749870, y: 17.4875769))
+        path.addLine(to: CGPoint(x: 19.3440000, y: 12.4183000))
+        path.addCurve(to: CGPoint(x: 18.9370000, y: 11.7513000), control1: CGPoint(x: 19.3354792, y: 12.1397415), control2: CGPoint(x: 19.1808188, y: 11.8862809))
+        path.addLine(to: CGPoint(x: 18.9371000, y: 11.7514000))
+        path.closeSubpath()
+        path.move(to: CGPoint(x: 20.9478000, y: 8.7283000))
+        path.addLine(to: CGPoint(x: 20.8058000, y: 8.6431000))
+        path.addLine(to: CGPoint(x: 16.0323000, y: 5.8613000))
+        path.addCurve(to: CGPoint(x: 15.2469000, y: 5.8613000), control1: CGPoint(x: 15.7898333, y: 5.7190123), control2: CGPoint(x: 15.4893667, y: 5.7190123))
+        path.addLine(to: CGPoint(x: 9.4090000, y: 9.2297000))
+        path.addLine(to: CGPoint(x: 9.4090000, y: 6.8974000))
+        path.addCurve(to: CGPoint(x: 9.4374000, y: 6.8359000), control1: CGPoint(x: 9.4064669, y: 6.8732422), control2: CGPoint(x: 9.4173674, y: 6.8496372))
+        path.addLine(to: CGPoint(x: 14.2677000, y: 4.0493000))
+        path.addCurve(to: CGPoint(x: 19.0877365, y: 4.2577824), control1: CGPoint(x: 15.7789777, y: 3.1786744), control2: CGPoint(x: 17.6572772, y: 3.2599171))
+        path.addCurve(to: CGPoint(x: 20.9479000, y: 8.7093000), control1: CGPoint(x: 20.5181958, y: 5.2556478), control2: CGPoint(x: 21.2430750, y: 6.9903408))
+        path.addLine(to: CGPoint(x: 20.9478000, y: 8.7283000))
+        path.closeSubpath()
+        path.move(to: CGPoint(x: 8.3065000, y: 12.8630000))
+        path.addLine(to: CGPoint(x: 6.2865000, y: 11.6992000))
+        path.addCurve(to: CGPoint(x: 6.2485000, y: 11.6425000), control1: CGPoint(x: 6.2660412, y: 11.6868815), control2: CGPoint(x: 6.2521173, y: 11.6661056))
+        path.addLine(to: CGPoint(x: 6.2485000, y: 6.0742000))
+        path.addCurve(to: CGPoint(x: 8.8397409, y: 2.0054384), control1: CGPoint(x: 6.2507696, y: 4.3303879), control2: CGPoint(x: 7.2604882, y: 2.7449295))
+        path.addCurve(to: CGPoint(x: 13.6242000, y: 2.6205000), control1: CGPoint(x: 10.4189935, y: 1.2659473), control2: CGPoint(x: 12.2833348, y: 1.5056159))
+        path.addLine(to: CGPoint(x: 13.4822000, y: 2.7010000))
+        path.addLine(to: CGPoint(x: 8.7040000, y: 5.4590000))
+        path.addCurve(to: CGPoint(x: 8.3113000, y: 6.1403000), control1: CGPoint(x: 8.4620537, y: 5.6008982), control2: CGPoint(x: 8.3128135, y: 5.8598168))
+        path.addLine(to: CGPoint(x: 8.3065000, y: 12.8630000))
+        path.closeSubpath()
+        path.move(to: CGPoint(x: 9.4041000, y: 10.4976000))
+        path.addLine(to: CGPoint(x: 12.0061000, y: 8.9978000))
+        path.addLine(to: CGPoint(x: 14.6130000, y: 10.4976000))
+        path.addLine(to: CGPoint(x: 14.6130000, y: 13.4970000))
+        path.addLine(to: CGPoint(x: 12.0156000, y: 14.9967000))
+        path.addLine(to: CGPoint(x: 9.4089000, y: 13.4970000))
+        path.addLine(to: CGPoint(x: 9.4041000, y: 10.4976000))
+        path.closeSubpath()
+        return path.applying(CGAffineTransform(scaleX: rect.width / 24, y: rect.height / 24))
+    }
+}
+
+struct ClaudeMark: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: 4.7144000, y: 15.9555000))
+        path.addLine(to: CGPoint(x: 9.4318000, y: 13.3084000))
+        path.addLine(to: CGPoint(x: 9.5108000, y: 13.0777000))
+        path.addLine(to: CGPoint(x: 9.4318000, y: 12.9502000))
+        path.addLine(to: CGPoint(x: 9.2011000, y: 12.9502000))
+        path.addLine(to: CGPoint(x: 8.4118000, y: 12.9016000))
+        path.addLine(to: CGPoint(x: 5.7162000, y: 12.8287000))
+        path.addLine(to: CGPoint(x: 3.3787000, y: 12.7316000))
+        path.addLine(to: CGPoint(x: 1.1141000, y: 12.6102000))
+        path.addLine(to: CGPoint(x: 0.5434000, y: 12.4887000))
+        path.addLine(to: CGPoint(x: 0.0091000, y: 11.7845000))
+        path.addLine(to: CGPoint(x: 0.0637000, y: 11.4323000))
+        path.addLine(to: CGPoint(x: 0.5434000, y: 11.1105000))
+        path.addLine(to: CGPoint(x: 1.2294000, y: 11.1713000))
+        path.addLine(to: CGPoint(x: 2.7473000, y: 11.2745000))
+        path.addLine(to: CGPoint(x: 5.0240000, y: 11.4323000))
+        path.addLine(to: CGPoint(x: 6.6754000, y: 11.5295000))
+        path.addLine(to: CGPoint(x: 9.1222000, y: 11.7845000))
+        path.addLine(to: CGPoint(x: 9.5108000, y: 11.7845000))
+        path.addLine(to: CGPoint(x: 9.5654000, y: 11.6266000))
+        path.addLine(to: CGPoint(x: 9.4318000, y: 11.5295000))
+        path.addLine(to: CGPoint(x: 9.3286000, y: 11.4323000))
+        path.addLine(to: CGPoint(x: 6.9730000, y: 9.8356000))
+        path.addLine(to: CGPoint(x: 4.4230000, y: 8.1477000))
+        path.addLine(to: CGPoint(x: 3.0874000, y: 7.1763000))
+        path.addLine(to: CGPoint(x: 2.3649000, y: 6.6845000))
+        path.addLine(to: CGPoint(x: 2.0006000, y: 6.2231000))
+        path.addLine(to: CGPoint(x: 1.8428000, y: 5.2153000))
+        path.addLine(to: CGPoint(x: 2.4985000, y: 4.4928000))
+        path.addLine(to: CGPoint(x: 3.3788000, y: 4.5535000))
+        path.addLine(to: CGPoint(x: 3.6034000, y: 4.6142000))
+        path.addLine(to: CGPoint(x: 4.4959000, y: 5.3002000))
+        path.addLine(to: CGPoint(x: 6.4023000, y: 6.7756000))
+        path.addLine(to: CGPoint(x: 8.8916000, y: 8.6092000))
+        path.addLine(to: CGPoint(x: 9.2559000, y: 8.9127000))
+        path.addLine(to: CGPoint(x: 9.4016000, y: 8.8095000))
+        path.addLine(to: CGPoint(x: 9.4198000, y: 8.7367000))
+        path.addLine(to: CGPoint(x: 9.2558000, y: 8.4634000))
+        path.addLine(to: CGPoint(x: 7.9019000, y: 6.0167000))
+        path.addLine(to: CGPoint(x: 6.4569000, y: 3.5274000))
+        path.addLine(to: CGPoint(x: 5.8134000, y: 2.4954000))
+        path.addLine(to: CGPoint(x: 5.6434000, y: 1.8760000))
+        path.addCurve(to: CGPoint(x: 5.5402000, y: 1.1475000), control1: CGPoint(x: 5.5827000, y: 1.6210000), control2: CGPoint(x: 5.5402000, y: 1.4086000))
+        path.addLine(to: CGPoint(x: 6.2870000, y: 0.1335000))
+        path.addLine(to: CGPoint(x: 6.6997000, y: 0.0000000))
+        path.addLine(to: CGPoint(x: 7.6954000, y: 0.1336000))
+        path.addLine(to: CGPoint(x: 8.1144000, y: 0.4978000))
+        path.addLine(to: CGPoint(x: 8.7336000, y: 1.9125000))
+        path.addLine(to: CGPoint(x: 9.7354000, y: 4.1407000))
+        path.addLine(to: CGPoint(x: 11.2897000, y: 7.1703000))
+        path.addLine(to: CGPoint(x: 11.7450000, y: 8.0688000))
+        path.addLine(to: CGPoint(x: 11.9879000, y: 8.9006000))
+        path.addLine(to: CGPoint(x: 12.0789000, y: 9.1556000))
+        path.addLine(to: CGPoint(x: 12.2368000, y: 9.1556000))
+        path.addLine(to: CGPoint(x: 12.2368000, y: 9.0099000))
+        path.addLine(to: CGPoint(x: 12.3643000, y: 7.3039000))
+        path.addLine(to: CGPoint(x: 12.6011000, y: 5.2092000))
+        path.addLine(to: CGPoint(x: 12.8318000, y: 2.5135000))
+        path.addLine(to: CGPoint(x: 12.9107000, y: 1.7546000))
+        path.addLine(to: CGPoint(x: 13.2871000, y: 0.8439000))
+        path.addLine(to: CGPoint(x: 14.0339000, y: 0.3521000))
+        path.addLine(to: CGPoint(x: 14.6167000, y: 0.6314000))
+        path.addLine(to: CGPoint(x: 15.0964000, y: 1.3174000))
+        path.addLine(to: CGPoint(x: 15.0296000, y: 1.7607000))
+        path.addLine(to: CGPoint(x: 14.7443000, y: 3.6124000))
+        path.addLine(to: CGPoint(x: 14.1857000, y: 6.5145000))
+        path.addLine(to: CGPoint(x: 13.8214000, y: 8.4574000))
+        path.addLine(to: CGPoint(x: 14.0339000, y: 8.4574000))
+        path.addLine(to: CGPoint(x: 14.2768000, y: 8.2145000))
+        path.addLine(to: CGPoint(x: 15.2603000, y: 6.9092000))
+        path.addLine(to: CGPoint(x: 16.9117000, y: 4.8449000))
+        path.addLine(to: CGPoint(x: 17.6403000, y: 4.0253000))
+        path.addLine(to: CGPoint(x: 18.4903000, y: 3.1207000))
+        path.addLine(to: CGPoint(x: 19.0367000, y: 2.6896000))
+        path.addLine(to: CGPoint(x: 20.0688000, y: 2.6896000))
+        path.addLine(to: CGPoint(x: 20.8278000, y: 3.8189000))
+        path.addLine(to: CGPoint(x: 20.4878000, y: 4.9846000))
+        path.addLine(to: CGPoint(x: 19.4253000, y: 6.3324000))
+        path.addLine(to: CGPoint(x: 18.5449000, y: 7.4738000))
+        path.addLine(to: CGPoint(x: 17.2821000, y: 9.1738000))
+        path.addLine(to: CGPoint(x: 16.4928000, y: 10.5338000))
+        path.addLine(to: CGPoint(x: 16.5657000, y: 10.6431000))
+        path.addLine(to: CGPoint(x: 16.7539000, y: 10.6248000))
+        path.addLine(to: CGPoint(x: 19.6074000, y: 10.0178000))
+        path.addLine(to: CGPoint(x: 21.1495000, y: 9.7384000))
+        path.addLine(to: CGPoint(x: 22.9891000, y: 9.4227000))
+        path.addLine(to: CGPoint(x: 23.8209000, y: 9.8113000))
+        path.addLine(to: CGPoint(x: 23.9119000, y: 10.2059000))
+        path.addLine(to: CGPoint(x: 23.5841000, y: 11.0134000))
+        path.addLine(to: CGPoint(x: 21.6171000, y: 11.4991000))
+        path.addLine(to: CGPoint(x: 19.3099000, y: 11.9605000))
+        path.addLine(to: CGPoint(x: 15.8735000, y: 12.7741000))
+        path.addLine(to: CGPoint(x: 15.8310000, y: 12.8045000))
+        path.addLine(to: CGPoint(x: 15.8796000, y: 12.8652000))
+        path.addLine(to: CGPoint(x: 17.4278000, y: 13.0109000))
+        path.addLine(to: CGPoint(x: 18.0896000, y: 13.0473000))
+        path.addLine(to: CGPoint(x: 19.7106000, y: 13.0473000))
+        path.addLine(to: CGPoint(x: 22.7281000, y: 13.2720000))
+        path.addLine(to: CGPoint(x: 23.5173000, y: 13.7940000))
+        path.addLine(to: CGPoint(x: 23.9909000, y: 14.4316000))
+        path.addLine(to: CGPoint(x: 23.9119000, y: 14.9173000))
+        path.addLine(to: CGPoint(x: 22.6977000, y: 15.5366000))
+        path.addLine(to: CGPoint(x: 21.0584000, y: 15.1480000))
+        path.addLine(to: CGPoint(x: 17.2334000, y: 14.2373000))
+        path.addLine(to: CGPoint(x: 15.9221000, y: 13.9094000))
+        path.addLine(to: CGPoint(x: 15.7399000, y: 13.9094000))
+        path.addLine(to: CGPoint(x: 15.7399000, y: 14.0187000))
+        path.addLine(to: CGPoint(x: 16.8328000, y: 15.0873000))
+        path.addLine(to: CGPoint(x: 18.8363000, y: 16.8965000))
+        path.addLine(to: CGPoint(x: 21.3438000, y: 19.2279000))
+        path.addLine(to: CGPoint(x: 21.4713000, y: 19.8047000))
+        path.addLine(to: CGPoint(x: 21.1495000, y: 20.2601000))
+        path.addLine(to: CGPoint(x: 20.8095000, y: 20.2115000))
+        path.addLine(to: CGPoint(x: 18.6056000, y: 18.5540000))
+        path.addLine(to: CGPoint(x: 17.7556000, y: 17.8072000))
+        path.addLine(to: CGPoint(x: 15.8310000, y: 16.1862000))
+        path.addLine(to: CGPoint(x: 15.7035000, y: 16.1862000))
+        path.addLine(to: CGPoint(x: 15.7035000, y: 16.3562000))
+        path.addLine(to: CGPoint(x: 16.1467000, y: 17.0058000))
+        path.addLine(to: CGPoint(x: 18.4903000, y: 20.5272000))
+        path.addLine(to: CGPoint(x: 18.6117000, y: 21.6079000))
+        path.addLine(to: CGPoint(x: 18.4417000, y: 21.9600000))
+        path.addLine(to: CGPoint(x: 17.8346000, y: 22.1725000))
+        path.addLine(to: CGPoint(x: 17.1667000, y: 22.0511000))
+        path.addLine(to: CGPoint(x: 15.7946000, y: 20.1265000))
+        path.addLine(to: CGPoint(x: 14.3800000, y: 17.9590000))
+        path.addLine(to: CGPoint(x: 13.2386000, y: 16.0162000))
+        path.addLine(to: CGPoint(x: 13.0989000, y: 16.0952000))
+        path.addLine(to: CGPoint(x: 12.4249000, y: 23.3504000))
+        path.addLine(to: CGPoint(x: 12.1093000, y: 23.7207000))
+        path.addLine(to: CGPoint(x: 11.3807000, y: 24.0000000))
+        path.addLine(to: CGPoint(x: 10.7736000, y: 23.5386000))
+        path.addLine(to: CGPoint(x: 10.4518000, y: 22.7918000))
+        path.addLine(to: CGPoint(x: 10.7736000, y: 21.3165000))
+        path.addLine(to: CGPoint(x: 11.1622000, y: 19.3919000))
+        path.addLine(to: CGPoint(x: 11.4779000, y: 17.8619000))
+        path.addLine(to: CGPoint(x: 11.7632000, y: 15.9615000))
+        path.addLine(to: CGPoint(x: 11.9332000, y: 15.3301000))
+        path.addLine(to: CGPoint(x: 11.9211000, y: 15.2876000))
+        path.addLine(to: CGPoint(x: 11.7814000, y: 15.3058000))
+        path.addLine(to: CGPoint(x: 10.3486000, y: 17.2730000))
+        path.addLine(to: CGPoint(x: 8.1690000, y: 20.2176000))
+        path.addLine(to: CGPoint(x: 6.4447000, y: 22.0632000))
+        path.addLine(to: CGPoint(x: 6.0319000, y: 22.2272000))
+        path.addLine(to: CGPoint(x: 5.3155000, y: 21.8568000))
+        path.addLine(to: CGPoint(x: 5.3822000, y: 21.1950000))
+        path.addLine(to: CGPoint(x: 5.7830000, y: 20.6061000))
+        path.addLine(to: CGPoint(x: 8.1690000, y: 17.5704000))
+        path.addLine(to: CGPoint(x: 9.6079000, y: 15.6884000))
+        path.addLine(to: CGPoint(x: 10.5369000, y: 14.6016000))
+        path.addLine(to: CGPoint(x: 10.5307000, y: 14.4437000))
+        path.addLine(to: CGPoint(x: 10.4761000, y: 14.4437000))
+        path.addLine(to: CGPoint(x: 4.1376000, y: 18.5601000))
+        path.addLine(to: CGPoint(x: 3.0083000, y: 18.7058000))
+        path.addLine(to: CGPoint(x: 2.5226000, y: 18.2504000))
+        path.addLine(to: CGPoint(x: 2.5834000, y: 17.5037000))
+        path.addLine(to: CGPoint(x: 2.8141000, y: 17.2608000))
+        path.addLine(to: CGPoint(x: 4.7205000, y: 15.9494000))
+        path.addLine(to: CGPoint(x: 4.7144000, y: 15.9555000))
+        path.closeSubpath()
+        return path.applying(CGAffineTransform(scaleX: rect.width / 24, y: rect.height / 24))
     }
 }
