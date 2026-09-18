@@ -22,6 +22,12 @@ scripts/package-app.sh
 
 The store defaults to `~/Library/Application Support/TrackerTrapper/store.json`. Override it with `TRACKER_TRAPPER_STORE` for tests or separate environments. The CLI and stdio MCP server use the same actor-backed service and do not place credentials in the store.
 
+All processes coordinate through a `store.json.lock` sidecar: each operation locks, reloads the current file, and commits changes atomically. Keep the lock file in place while the app or connectors are running. The popover reloads once per second and on Refresh; read failures retain the last visible state and display an error. MCP tool calls return standard text content plus structured results.
+
+After upgrading, reconnect/restart existing MCP clients so they launch the new binary. Older running servers do not participate in file locking and must not continue writing alongside the updated version. Restart the menu-bar app as well.
+
+Regression checks: `swift test` and `python3 scripts/test-mcp-integration.py .build/release/tracker-trapper-mcp` after a release build. The integration check uses temporary storage and four separate MCP processes.
+
 `create-issue` is explicit: it creates the GitHub issue, imports its stable `TT-xx` checklist, and registers it locally. If GitHub succeeds but local registration fails, the attempt is retained in the store and can be retried with `retry-registrations` or the printed `import-issue` command. Repeating registration for the same repository and issue is idempotent.
 
 To synchronize the tracker-owned checklist block for an issue, set `TT_TRACKER_TRAPPER_BIN` to the built CLI and run `Integrations/sync-github-issue.sh --repo owner/name --issue 123 --plan-id <id> --dry-run` first. The script uses `gh` authentication, changes only its marked block, preserves unrelated issue content, and refuses to overwrite a changed tracker block unless `--force` is supplied.

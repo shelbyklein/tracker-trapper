@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public actor TrackerStore {
     public let url: URL
@@ -24,35 +25,52 @@ public actor TrackerStore {
         return base.appendingPathComponent("TrackerTrapper/store.json")
     }
 
-    public func read() -> StoreSnapshot { snapshot }
+    public func read() throws -> StoreSnapshot {
+        try transaction { snapshot }
+    }
 
     @discardableResult public func register(_ plan: Plan) throws -> Plan {
+        try transaction {
         if let index = snapshot.plans.firstIndex(where: { $0.repository == plan.repository && $0.issueNumber == plan.issueNumber }) {
             var existing = snapshot.plans[index]
             let incomingIDs = Set(plan.todos.map(\.id))
             let existingIDs = Set(existing.todos.map(\.id))
             guard incomingIDs == existingIDs || existingIDs.isEmpty else { throw StoreError.conflict("plan contains changed todo IDs") }
-            existing.title = plan.title; existing.todos = plan.todos; existing.updatedAt = .now; existing.revision += 1
+            existing.title = plan.title
+            existing.todos = plan.todos.map { incoming in
+                guard var saved = existing.todos.first(where: { $0.id == incoming.id }) else { return incoming }
+                saved.description = incoming.description; saved.acceptance = incoming.acceptance
+                return saved
+            }
+            existing.updatedAt = .now; existing.revision += 1
             snapshot.plans[index] = existing; try persist(); return existing
         }
         snapshot.plans.append(plan); try persist(); return plan
+        }
     }
 
     public func enqueueRegistrationRetry(_ retry: RegistrationRetry) throws {
+        try transaction {
         if !snapshot.registrationRetries.contains(where: { $0.id == retry.id }) { snapshot.registrationRetries.append(retry); try persist() }
+        }
     }
 
     public func clearRegistrationRetry(id: String) throws {
+        try transaction {
         snapshot.registrationRetries.removeAll { $0.id == id }; try persist()
+        }
     }
 
     public func startRun(planID: String, agent: String, sessionID: String, repositoryPath: String) throws -> Run {
+        try transaction {
         guard snapshot.plans.contains(where: { $0.id == planID }) else { throw StoreError.notFound("plan \(planID)") }
         let run = Run(planID: planID, agent: agent, sessionID: sessionID, repositoryPath: repositoryPath)
         snapshot.runs.append(run); appendEvent(ProgressEvent(type: "run_started", planID: planID, runID: run.id)); try persist(); return run
+        }
     }
 
     public func update(runID: String, todoID: String?, status: TodoStatus?, message: String?, evidence: [String] = [], eventID: String = UUID().uuidString) throws {
+        try transaction {
         if snapshot.events.contains(where: { $0.id == eventID }) { return }
         guard let runIndex = snapshot.runs.firstIndex(where: { $0.id == runID }) else { throw StoreError.notFound("run \(runID)") }
         let run = snapshot.runs[runIndex]
@@ -67,22 +85,49 @@ public actor TrackerStore {
         snapshot.runs[runIndex].lastActivityAt = .now; snapshot.runs[runIndex].lastTaskUpdateAt = .now
         appendEvent(ProgressEvent(id: eventID, type: status == nil ? "activity" : "todo_updated", planID: run.planID, runID: runID, todoID: todoID, message: message, evidence: evidence))
         try persist()
+        }
     }
 
     public func finishRun(runID: String, status: RunStatus, message: String? = nil) throws {
+        try transaction {
         guard let index = snapshot.runs.firstIndex(where: { $0.id == runID }) else { throw StoreError.notFound("run \(runID)") }
         let planID = snapshot.runs[index].planID
         let unresolved = snapshot.plans.first(where: { $0.id == planID })?.todos.filter { $0.status != .completed && $0.status != .skipped }.map(\.id) ?? []
         let reconciliation = unresolved.isEmpty ? message : message ?? "unresolved todos: \(unresolved.joined(separator: ", "))"
         snapshot.runs[index].status = status; snapshot.runs[index].endedAt = .now; snapshot.runs[index].lastActivityAt = .now
         appendEvent(ProgressEvent(type: "run_\(status.rawValue)", planID: planID, runID: runID, message: reconciliation)); try persist()
+        }
     }
 
-    public func acknowledgeOutbox() throws { snapshot.outbox.removeAll(); try persist() }
+    public func acknowledgeOutbox() throws { try transaction { snapshot.outbox.removeAll(); try persist() } }
 
     public func recordSync(planID: String, hash: String) throws {
+        try transaction {
         guard let index = snapshot.plans.firstIndex(where: { $0.id == planID }) else { throw StoreError.notFound("plan \(planID)") }
         snapshot.plans[index].lastSyncedProgressHash = hash; try persist()
+        }
+    }
+
+    // Lock a stable sidecar inode, not the JSON file replaced by atomic writes.
+    // Keep reload, validation, mutation and persistence in one synchronous lock.
+    private func transaction<T>(_ body: () throws -> T) throws -> T {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let descriptor = Darwin.open(url.appendingPathExtension("lock").path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { Darwin.close(descriptor) }
+        while flock(descriptor, LOCK_EX) != 0 {
+            if errno != EINTR { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        }
+        defer { flock(descriptor, LOCK_UN) }
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        if FileManager.default.fileExists(atPath: url.path) {
+            snapshot = try decoder.decode(StoreSnapshot.self, from: Data(contentsOf: url))
+        } else {
+            snapshot = StoreSnapshot()
+        }
+        let before = snapshot
+        do { return try body() }
+        catch { snapshot = before; throw error }
     }
 
     private func appendEvent(_ event: ProgressEvent) { if !snapshot.events.contains(where: { $0.id == event.id }) { snapshot.events.append(event); snapshot.outbox.append(event) } }

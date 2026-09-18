@@ -19,7 +19,14 @@ struct TrackerTrapperMCP {
                 case "initialize": result = ["protocolVersion": "2025-06-18", "capabilities": ["tools": [:]], "serverInfo": ["name": "tracker-trapper", "version": "0.1.0"]]
                 case "notifications/initialized": continue
                 case "tools/list": result = ["tools": tools]
-                case "tools/call": result = try await call(request["params"] as? [String: Any] ?? [:], store: store)
+                case "tools/call":
+                    do {
+                        let value = try await call(request["params"] as? [String: Any] ?? [:], store: store)
+                        let json = try JSONSerialization.data(withJSONObject: value)
+                        result = ["content": [["type": "text", "text": String(decoding: json, as: UTF8.self)]], "structuredContent": value, "isError": false]
+                    } catch {
+                        result = ["content": [["type": "text", "text": error.localizedDescription]], "isError": true]
+                    }
                 default: throw MCPError.methodNotFound(method)
                 }
                 try write(["jsonrpc": "2.0", "id": id ?? NSNull(), "result": result])
@@ -53,7 +60,7 @@ struct TrackerTrapperMCP {
             let plan = Plan(repository: try string("repository", args), issueNumber: try integer("issueNumber", args), issueURL: try string("issueURL", args), title: try string("title", args), todos: todos)
             return try await store.register(plan).json()
         case "get_plan":
-            let id = try string("planID", args); guard let plan = await store.read().plans.first(where: { $0.id == id }) else { throw StoreError.notFound(id) }; return try plan.json()
+            let id = try string("planID", args); guard let plan = try await store.read().plans.first(where: { $0.id == id }) else { throw StoreError.notFound(id) }; return try plan.json()
         case "start_run":
             return try await store.startRun(planID: string("planID", args), agent: string("agent", args), sessionID: string("sessionID", args), repositoryPath: string("repositoryPath", args)).json()
         case "start_task", "complete_task", "update_task":

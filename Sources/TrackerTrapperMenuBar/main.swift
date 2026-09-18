@@ -32,7 +32,18 @@ struct TrackerTrapperMenuBar: App {
 
     @objc private func togglePopover() {
         guard let button = statusItem?.button else { return }
-        if popover.isShown { popover.performClose(nil) } else { model.refresh(); popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY); NSApp.activate(ignoringOtherApps: true) }
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            // Use the menu-bar display's usable area, excluding the Dock and
+            // leaving room for the popover arrow and screen-edge margins.
+            let screen = button.window?.screen ?? NSScreen.main
+            model.panelHeight = max(200, (screen?.visibleFrame.height ?? 700) - 32)
+            popover.contentSize = NSSize(width: 420, height: model.panelHeight)
+            model.refresh()
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     private func registerHotKey() {
@@ -55,26 +66,34 @@ struct TrackerTrapperMenuBar: App {
 }
 
 @MainActor final class MenuModel: ObservableObject {
+    @Published var panelHeight: CGFloat = 600
     @Published var snapshot = StoreSnapshot()
     @Published var error: String?
     @Published private(set) var attentionItems: [String] = []
     private var hasLoadedSnapshot = false
     private var notificationPermissionRequested = false
     private var dismissedAttentionKeys = Set<String>()
+    private var refreshInFlight = false
     let store: TrackerStore?
     init() { store = try? TrackerStore(); refresh() }
     var badge: String { let count = snapshot.plans.reduce(0) { $0 + $1.todos.filter { $0.status == .inProgress }.count }; return count == 0 ? "Tracker Trapper" : "\(count)" }
     var symbol: String { snapshot.plans.contains { plan in plan.todos.contains { $0.status == .blocked } } ? "exclamationmark.circle.fill" : "checklist" }
     func refresh() {
         guard let store else { error = "Unable to open local store"; return }
+        guard !refreshInFlight else { return }
+        refreshInFlight = true
         Task { @MainActor in
-            let next = await store.read()
+            defer { refreshInFlight = false }
+            do {
+            let next = try await store.read()
             let oldKeys = Set(attentionKeys(for: snapshot))
             let newKeys = Set(attentionKeys(for: next))
             snapshot = next
             attentionItems = Array(newKeys.subtracting(dismissedAttentionKeys)).sorted()
             if hasLoadedSnapshot { notify(for: newKeys.subtracting(oldKeys)) }
             hasLoadedSnapshot = true
+            error = nil
+            } catch { self.error = "Unable to refresh local store: \(error.localizedDescription)" }
         }
     }
     func dismissAttention(_ item: String) { dismissedAttentionKeys.insert(item); attentionItems.removeAll { $0 == item } }
@@ -126,9 +145,15 @@ struct MenuContent: View {
             ScrollView {
                 if model.snapshot.plans.isEmpty { Text("No registered plans yet.").foregroundStyle(.secondary); Text("Use tracker-trapper register-plan to connect an issue.").font(.caption).foregroundStyle(.secondary) }
                 ForEach(model.snapshot.plans) { plan in PlanCard(plan: plan, runs: model.snapshot.runs.filter { $0.planID == plan.id }) }
-            }.frame(maxHeight: 520)
+            }.frame(maxHeight: .infinity)
             Divider(); Text(model.snapshot.outbox.isEmpty ? "Synced or no pending updates." : "\(model.snapshot.outbox.count) update(s) saved locally; GitHub sync pending.").font(.caption).foregroundStyle(.secondary)
-        }.padding(16).frame(width: 420)
+        }.padding(16).frame(width: 420, height: model.panelHeight)
+        .task {
+            while !Task.isCancelled {
+                model.refresh()
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
+        }
     }
     func attentionLabel(_ key: String) -> String {
         switch key.split(separator: ":").last.map(String.init) {

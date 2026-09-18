@@ -50,7 +50,7 @@ struct TrackerTrapperCLI {
                 throw CLIError.usage("GitHub issue created at \(issueURL), but local registration failed: \(error.localizedDescription). Retry with import-issue --repo \(repository) --issue \(issueNumber)")
             }
         case "retry-registrations":
-            let retries = await store.read().registrationRetries
+            let retries = try await store.read().registrationRetries
             var failures: [String] = []
             for retry in retries {
                 do {
@@ -65,7 +65,7 @@ struct TrackerTrapperCLI {
             if !failures.isEmpty { throw CLIError.usage("registration retries still pending: \(failures.joined(separator: "; "))") }
         case "get-plan":
             guard let id = value(after: "--plan-id", in: args) else { throw CLIError.usage("get-plan requires --plan-id") }
-            let result = await store.read().plans.first { $0.id == id || "\($0.issueNumber)" == id }
+            let result = try await store.read().plans.first { $0.id == id || "\($0.issueNumber)" == id }
             guard let result else { throw StoreError.notFound("plan \(id)") }; try printJSON(result)
         case "start-run":
             guard let planID = value(after: "--plan-id", in: args), let agent = value(after: "--agent", in: args), let session = value(after: "--session-id", in: args) else { throw CLIError.usage("start-run requires --plan-id, --agent and --session-id") }
@@ -87,7 +87,7 @@ struct TrackerTrapperCLI {
         case "finish-run":
             guard let runID = value(after: "--run-id", in: args), let raw = value(after: "--status", in: args), let status = RunStatus(rawValue: raw) else { throw CLIError.usage("finish-run requires --run-id and --status") }
             try await store.finishRun(runID: runID, status: status, message: value(after: "--message", in: args)); print("finished")
-        case "snapshot": try printJSON(await store.read())
+        case "snapshot": try printJSON(try await store.read())
         default: throw CLIError.usage("unknown command \(command)")
         }
     }
