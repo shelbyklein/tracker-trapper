@@ -5,7 +5,7 @@
 Date: 2026-09-17
 Repository: https://github.com/shelbyklein/tracker-trapper
 Tracking issue: https://github.com/shelbyklein/tracker-trapper/issues/1
-Status: planned; no application implementation or runtime acceptance completed.
+Status: implementation in progress; local core and menu-bar shell built, agent/GitHub runtime acceptance remains.
 
 ## Outcome
 
@@ -17,7 +17,7 @@ The immediate problem is that plans and issue checklists are created but lose co
 
 On 2026-09-17, GitHub reported an empty default branch and no existing issues for this repository. The supplied local directory was empty and was cloned from the requested repository. There is no existing application source, architecture, or test suite to extend.
 
-Documentation reviewed during the preceding research supports the following integration candidates; these are documented capabilities, not tested compatibility with the user's installed clients:
+Documentation reviewed during the preceding research supports the following integration candidates; the installed-client matrix is recorded in `instructions/2026-09-17-capability-matrix.md` and still distinguishes executable discovery from authenticated runtime acceptance:
 
 - Apple SwiftUI `MenuBarExtra` supports a persistent menu-bar control and window-style content: https://developer.apple.com/documentation/swiftui/menubarextra
 - Codex hooks document lifecycle events and observation of local function tools such as `update_plan`. Specialized paths may bypass hooks; transcripts are not a stable interface: https://learn.chatgpt.com/docs/hooks

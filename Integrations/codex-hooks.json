@@ -1,0 +1,30 @@
+{
+  "description": "Tracker Trapper activity reporting for Codex",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "TT_EVENT_MESSAGE='Codex tool activity' TT_TRACKER_TRAPPER_BIN=/absolute/path/to/tracker-trapper TT_RUN_ID=run-id /absolute/path/to/tracker-trapper/Integrations/report-event.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "TT_EVENT_MESSAGE='Codex turn stopped' TT_TRACKER_TRAPPER_BIN=/absolute/path/to/tracker-trapper TT_RUN_ID=run-id /absolute/path/to/tracker-trapper/Integrations/report-event.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
