@@ -71,7 +71,7 @@ struct MenuContent: View {
             if let error = model.error { Text(error).foregroundStyle(.red) }
             if model.snapshot.plans.isEmpty { Text("No registered plans yet.").foregroundStyle(.secondary); Text("Use tracker-trapper register-plan to connect an issue.").font(.caption).foregroundStyle(.secondary) }
             ForEach(model.snapshot.plans) { plan in PlanCard(plan: plan, runs: model.snapshot.runs.filter { $0.planID == plan.id }) }
-            Divider(); Text("Local updates are saved automatically.").font(.caption).foregroundStyle(.secondary)
+            Divider(); Text(model.snapshot.outbox.isEmpty ? "Synced or no pending updates." : "\(model.snapshot.outbox.count) update(s) saved locally; GitHub sync pending.").font(.caption).foregroundStyle(.secondary)
         }.padding(16).frame(width: 420)
     }
 }

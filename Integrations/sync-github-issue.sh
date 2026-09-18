@@ -55,3 +55,4 @@ if [ "$DRY_RUN" -eq 1 ]; then cat "$NEW_FILE"; exit 0; fi
 gh issue edit "$ISSUE" --repo "$REPO" --body-file "$NEW_FILE"
 NEW_HASH="$(printf '%s\n' "$PROGRESS" | shasum -a 256 | awk '{print $1}')"
 TRACKER_TRAPPER_STORE="$STORE" "$TT_TRACKER_TRAPPER_BIN" record-sync --plan-id "$PLAN" --hash "$NEW_HASH" >/dev/null
+TRACKER_TRAPPER_STORE="$STORE" "$TT_TRACKER_TRAPPER_BIN" ack-outbox >/dev/null

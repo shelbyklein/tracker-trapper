@@ -49,6 +49,8 @@ struct TrackerTrapperCLI {
         case "record-sync":
             guard let planID = value(after: "--plan-id", in: args), let hash = value(after: "--hash", in: args) else { throw CLIError.usage("record-sync requires --plan-id and --hash") }
             try await store.recordSync(planID: planID, hash: hash); print("recorded")
+        case "ack-outbox":
+            try await store.acknowledgeOutbox(); print("acknowledged")
         case "finish-run":
             guard let runID = value(after: "--run-id", in: args), let raw = value(after: "--status", in: args), let status = RunStatus(rawValue: raw) else { throw CLIError.usage("finish-run requires --run-id and --status") }
             try await store.finishRun(runID: runID, status: status, message: value(after: "--message", in: args)); print("finished")
@@ -95,6 +97,7 @@ struct TrackerTrapperCLI {
     activity --run-id <id> [--message <text>] [--event-id <id>]
     finish-run --run-id <id> --status <paused|interrupted|finished|failed|waiting_for_user>
     snapshot
+    ack-outbox
     """) }
 }
 enum CLIError: Error, LocalizedError { case usage(String); var errorDescription: String? { if case .usage(let text) = self { return text }; return nil } }
