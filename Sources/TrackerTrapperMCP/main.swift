@@ -32,6 +32,8 @@ struct TrackerTrapperMCP {
         tool("register_plan", "Register or update a GitHub issue plan with stable todo IDs", ["repository": "string", "issueNumber": "integer", "issueURL": "string", "title": "string", "todos": "array"]),
         tool("get_plan", "Read a persistent plan and its current progress", ["planID": "string"]),
         tool("start_run", "Associate an agent session with a plan", ["planID": "string", "agent": "string", "sessionID": "string", "repositoryPath": "string"]),
+        tool("start_task", "Mark a stable todo as in progress", ["runID": "string", "todoID": "string", "message": "string", "eventID": "string"]),
+        tool("complete_task", "Mark a stable todo completed with evidence", ["runID": "string", "todoID": "string", "message": "string", "evidence": "array", "eventID": "string"]),
         tool("update_task", "Set a todo state and attach evidence", ["runID": "string", "todoID": "string", "status": "string", "message": "string", "evidence": "array", "eventID": "string"]),
         tool("report_activity", "Record agent activity without changing task completion", ["runID": "string", "message": "string", "eventID": "string"]),
         tool("finish_run", "Record a paused, interrupted, failed, or finished agent run", ["runID": "string", "status": "string", "message": "string"])
@@ -54,8 +56,9 @@ struct TrackerTrapperMCP {
             let id = try string("planID", args); guard let plan = await store.read().plans.first(where: { $0.id == id }) else { throw StoreError.notFound(id) }; return try plan.json()
         case "start_run":
             return try await store.startRun(planID: string("planID", args), agent: string("agent", args), sessionID: string("sessionID", args), repositoryPath: string("repositoryPath", args)).json()
-        case "update_task":
-            guard let status = TodoStatus(rawValue: try string("status", args)) else { throw MCPError.invalidParams }
+        case "start_task", "complete_task", "update_task":
+            let status = name == "start_task" ? TodoStatus.inProgress : name == "complete_task" ? TodoStatus.completed : TodoStatus(rawValue: try string("status", args))
+            guard let status else { throw MCPError.invalidParams }
             try await store.update(runID: string("runID", args), todoID: string("todoID", args), status: status, message: args["message"] as? String, evidence: args["evidence"] as? [String] ?? [], eventID: args["eventID"] as? String ?? UUID().uuidString)
             return ["ok": true]
         case "report_activity":

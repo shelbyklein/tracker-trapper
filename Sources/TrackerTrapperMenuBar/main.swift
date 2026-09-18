@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import TrackerTrapperCore
 
 @main
@@ -42,7 +43,15 @@ struct PlanCard: View {
             Text(plan.title).lineLimit(2)
             ProgressView(value: Double(completed), total: Double(max(plan.todos.count, 1)))
             ForEach(plan.todos) { todo in HStack(alignment: .top) { Image(systemName: icon(for: todo.status)).foregroundStyle(color(for: todo.status)); Text(todo.description).lineLimit(2) } }
-            if let run = runs.sorted(by: { $0.lastActivityAt > $1.lastActivityAt }).first { Text("\(run.agent) · \(run.status.rawValue) · last activity \(run.lastActivityAt.formatted(.relative(presentation: .named)))").font(.caption).foregroundStyle(.secondary) }
+            if let todo = plan.todos.first(where: { $0.status == .blocked }) { Label("Blocked: \(todo.description)", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange) }
+            if let evidence = plan.todos.flatMap(\.evidence).last { Text("Evidence: \(evidence)").font(.caption).lineLimit(2).foregroundStyle(.secondary) }
+            if let run = runs.sorted(by: { $0.lastActivityAt > $1.lastActivityAt }).first {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(run.agent) · \(run.status.rawValue)").font(.caption)
+                    Text("Activity \(run.lastActivityAt.formatted(.relative(presentation: .named))) · task update \(run.lastTaskUpdateAt?.formatted(.relative(presentation: .named)) ?? "unknown")").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            Button("Open GitHub issue") { NSWorkspace.shared.open(URL(string: plan.issueURL)!) }.buttonStyle(.link).font(.caption)
         }.padding(10).background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
     }
     func icon(for status: TodoStatus) -> String { switch status { case .completed: "checkmark.circle.fill"; case .inProgress: "circle.inset.filled"; case .blocked: "exclamationmark.triangle.fill"; case .skipped: "minus.circle"; case .pending: "circle" } }

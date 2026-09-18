@@ -35,9 +35,10 @@ struct TrackerTrapperCLI {
         case "start-run":
             guard let planID = value(after: "--plan-id", in: args), let agent = value(after: "--agent", in: args), let session = value(after: "--session-id", in: args) else { throw CLIError.usage("start-run requires --plan-id, --agent and --session-id") }
             try printJSON(await store.startRun(planID: planID, agent: agent, sessionID: session, repositoryPath: value(after: "--repo-path", in: args) ?? FileManager.default.currentDirectoryPath))
-        case "update-task":
+        case "update-task", "start-task", "complete-task":
             guard let runID = value(after: "--run-id", in: args), let todoID = value(after: "--todo-id", in: args), let raw = value(after: "--status", in: args), let status = TodoStatus(rawValue: raw) else { throw CLIError.usage("update-task requires --run-id, --todo-id and --status") }
-            try await store.update(runID: runID, todoID: todoID, status: status, message: value(after: "--message", in: args), evidence: values(after: "--evidence", in: args), eventID: value(after: "--event-id", in: args) ?? UUID().uuidString); print("updated")
+            let effectiveStatus = command == "start-task" ? TodoStatus.inProgress : command == "complete-task" ? TodoStatus.completed : status
+            try await store.update(runID: runID, todoID: todoID, status: effectiveStatus, message: value(after: "--message", in: args), evidence: values(after: "--evidence", in: args), eventID: value(after: "--event-id", in: args) ?? UUID().uuidString); print("updated")
         case "activity":
             guard let runID = value(after: "--run-id", in: args) else { throw CLIError.usage("activity requires --run-id") }
             try await store.update(runID: runID, todoID: nil, status: nil, message: value(after: "--message", in: args), evidence: values(after: "--evidence", in: args), eventID: value(after: "--event-id", in: args) ?? UUID().uuidString); print("recorded")
@@ -59,6 +60,8 @@ struct TrackerTrapperCLI {
     get-plan --plan-id <id>
     start-run --plan-id <id> --agent <name> --session-id <id> [--repo-path <path>]
     update-task --run-id <id> --todo-id <id> --status <pending|in_progress|blocked|completed|skipped> [--message <text>] [--evidence <value>] [--event-id <id>]
+    start-task --run-id <id> --todo-id <id> [--message <text>]
+    complete-task --run-id <id> --todo-id <id> [--message <text>] [--evidence <value>]
     activity --run-id <id> [--message <text>] [--event-id <id>]
     finish-run --run-id <id> --status <paused|interrupted|finished|failed|waiting_for_user>
     snapshot
