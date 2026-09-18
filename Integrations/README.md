@@ -9,4 +9,6 @@ Supported automatic signals:
 - Codex: `PostToolUse` and `Stop`.
 - Claude Code: `PostToolUse` and `Stop`.
 
+Claude `TaskCreated` and `TaskCompleted` hooks use `report-hook.sh`. If the task subject contains a stable ID such as `[TT-07] Map native tasks`, the hook maps it to `start-task` or `complete-task`. Tasks without a TT ID become activity events and cannot silently complete a plan item.
+
 The current adapters intentionally report bounded activity only. Plan registration and todo status changes are explicit CLI operations, which keeps automatic hooks from marking work complete or recursively reporting their own updates.

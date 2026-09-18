@@ -69,8 +69,10 @@ struct MenuContent: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack { Text("Tracker Trapper").font(.headline); Spacer(); Button("Refresh") { model.refresh() }.keyboardShortcut("r") }
             if let error = model.error { Text(error).foregroundStyle(.red) }
-            if model.snapshot.plans.isEmpty { Text("No registered plans yet.").foregroundStyle(.secondary); Text("Use tracker-trapper register-plan to connect an issue.").font(.caption).foregroundStyle(.secondary) }
-            ForEach(model.snapshot.plans) { plan in PlanCard(plan: plan, runs: model.snapshot.runs.filter { $0.planID == plan.id }) }
+            ScrollView {
+                if model.snapshot.plans.isEmpty { Text("No registered plans yet.").foregroundStyle(.secondary); Text("Use tracker-trapper register-plan to connect an issue.").font(.caption).foregroundStyle(.secondary) }
+                ForEach(model.snapshot.plans) { plan in PlanCard(plan: plan, runs: model.snapshot.runs.filter { $0.planID == plan.id }) }
+            }.frame(maxHeight: 520)
             Divider(); Text(model.snapshot.outbox.isEmpty ? "Synced or no pending updates." : "\(model.snapshot.outbox.count) update(s) saved locally; GitHub sync pending.").font(.caption).foregroundStyle(.secondary)
         }.padding(16).frame(width: 420)
     }
@@ -84,7 +86,7 @@ struct PlanCard: View {
             HStack { Text("\(plan.repository) #\(plan.issueNumber)").font(.subheadline.bold()); Spacer(); Text("\(completed)/\(plan.todos.count)").monospacedDigit().foregroundStyle(.secondary) }
             Text(plan.title).lineLimit(2)
             ProgressView(value: Double(completed), total: Double(max(plan.todos.count, 1)))
-            ForEach(plan.todos) { todo in HStack(alignment: .top) { Image(systemName: icon(for: todo.status)).foregroundStyle(color(for: todo.status)); Text(todo.description).lineLimit(2) } }
+            ForEach(plan.todos) { todo in HStack(alignment: .top) { Image(systemName: icon(for: todo.status)).foregroundStyle(color(for: todo.status)); Text(todo.description).fixedSize(horizontal: false, vertical: true) }.accessibilityElement(children: .ignore).accessibilityLabel("\(todo.status.rawValue): \(todo.description)") }
             if let todo = plan.todos.first(where: { $0.status == .blocked }) { Label("Blocked: \(todo.description)", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange) }
             if let evidence = plan.todos.flatMap(\.evidence).last { Text("Evidence: \(evidence)").font(.caption).lineLimit(2).foregroundStyle(.secondary) }
             if let run = runs.sorted(by: { $0.lastActivityAt > $1.lastActivityAt }).first {
