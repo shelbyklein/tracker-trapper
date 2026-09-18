@@ -1,0 +1,6 @@
+tunnel: 8f0f21a7-c16f-451c-b00a-7f2c90f02160
+credentials-file: /etc/cloudflared/tunnel.json
+ingress:
+  - hostname: trackertrapper.shelbyklein.com
+    service: http://web:8080
+  - service: http_status:404
