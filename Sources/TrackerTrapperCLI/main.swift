@@ -28,6 +28,10 @@ struct TrackerTrapperCLI {
             let input = try JSONDecoder().decode(PlanInput.self, from: data)
             let plan = Plan(id: input.id ?? UUID().uuidString, repository: input.repository, issueNumber: input.issueNumber, issueURL: input.issueURL, title: input.title, todos: input.todos.map { Todo(id: $0.id, description: $0.description, acceptance: $0.acceptance ?? "") })
             try printJSON(await store.register(plan))
+        case "import-issue":
+            guard let repository = value(after: "--repo", in: args), let issue = value(after: "--issue", in: args), let issueNumber = Int(issue) else { throw CLIError.usage("import-issue requires --repo owner/name and --issue number") }
+            let imported = try importIssue(repository: repository, issueNumber: issueNumber)
+            try printJSON(await store.register(imported))
         case "get-plan":
             guard let id = value(after: "--plan-id", in: args) else { throw CLIError.usage("get-plan requires --plan-id") }
             let result = await store.read().plans.first { $0.id == id || "\($0.issueNumber)" == id }
@@ -51,12 +55,35 @@ struct TrackerTrapperCLI {
     }
 
     static func readInput(_ args: [String]) throws -> Data { if let path = value(after: "--input", in: args) { return try Data(contentsOf: URL(fileURLWithPath: path)) }; return FileHandle.standardInput.readDataToEndOfFile() }
+    static func importIssue(repository: String, issueNumber: Int) throws -> Plan {
+        let data = try runProcess("gh", arguments: ["issue", "view", String(issueNumber), "--repo", repository, "--json", "title,body,url"])
+        struct Issue: Decodable { let title: String; let body: String; let url: String }
+        let issue = try JSONDecoder().decode(Issue.self, from: data)
+        let todos = issue.body.split(separator: "\n", omittingEmptySubsequences: false).compactMap { raw -> Todo? in
+            let line = String(raw); guard line.hasPrefix("- [") else { return nil }
+            guard let markerEnd = line.firstIndex(of: "]"), line.distance(from: line.startIndex, to: markerEnd) >= 3 else { return nil }
+            guard let boldStart = line.range(of: "**", range: markerEnd..<line.endIndex), let separator = line.range(of: " — ", range: boldStart.upperBound..<line.endIndex), let boldEnd = line.range(of: "**", range: separator.upperBound..<line.endIndex) else { return nil }
+            let id = String(line[boldStart.upperBound..<separator.lowerBound]).trimmingCharacters(in: .whitespaces)
+            guard id.hasPrefix("TT-") else { return nil }
+            let description = String(line[separator.upperBound..<boldEnd.lowerBound]).trimmingCharacters(in: .whitespaces)
+            let suffix = String(line[boldEnd.upperBound...])
+            let acceptance = suffix.split(separator: "Check:", maxSplits: 1).dropFirst().first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
+            let checked = line.count > 3 && line[line.index(line.startIndex, offsetBy: 3)] != " "
+            return Todo(id: id, description: description, acceptance: acceptance, status: checked ? .completed : .pending)
+        }
+        return Plan(id: "github:\(repository)#\(issueNumber)", repository: repository, issueNumber: issueNumber, issueURL: issue.url, title: issue.title, todos: todos)
+    }
+    static func runProcess(_ executable: String, arguments: [String]) throws -> Data {
+        let process = Process(); let output = Pipe(); process.executableURL = URL(fileURLWithPath: "/usr/bin/env"); process.arguments = [executable] + arguments; process.standardOutput = output; process.standardError = output
+        try process.run(); let data = output.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit(); guard process.terminationStatus == 0 else { throw CLIError.usage(String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) }; return data
+    }
     static func value(after flag: String, in args: [String]) -> String? { guard let index = args.firstIndex(of: flag), args.indices.contains(index + 1) else { return nil }; return args[index + 1] }
     static func values(after flag: String, in args: [String]) -> [String] { args.enumerated().compactMap { $0.element == flag && args.indices.contains($0.offset + 1) ? args[$0.offset + 1] : nil } }
     static func printJSON<T: Encodable>(_ value: T) throws { let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; print(String(decoding: try encoder.encode(value), as: UTF8.self)) }
     static func printHelp() { print("""
     tracker-trapper — local plan/progress bridge
     register-plan --input plan.json
+    import-issue --repo owner/name --issue 123
     get-plan --plan-id <id>
     start-run --plan-id <id> --agent <name> --session-id <id> [--repo-path <path>]
     update-task --run-id <id> --todo-id <id> --status <pending|in_progress|blocked|completed|skipped> [--message <text>] [--evidence <value>] [--event-id <id>]
