@@ -124,7 +124,7 @@ body{overflow-x:clip}
 
 /* White crumpled paper, lit from upper left and lifted off the page. */
 .preview-notice{--ink:#17191d;--muted:#50545b;color:var(--ink);filter:drop-shadow(1px 2px 1px #15192324) drop-shadow(9px 16px 12px #15192324)}
-.preview-notice::before{background:linear-gradient(130deg,#ffffff30 0%,#ffffff00 55%,#b7bdc51a 100%),url('assets/crumpled-white-paper.webp') center/cover no-repeat #fff;-webkit-mask-image:url('assets/rough-paper-mask.svg?v=paper-2');mask-image:url('assets/rough-paper-mask.svg?v=paper-2')}
+.preview-notice::before{background:linear-gradient(130deg,#ffffff30 0%,#ffffff00 55%,#b7bdc51a 100%),url('assets/crumpled-white-paper.webp') center/cover no-repeat #fff;-webkit-mask-image:url('assets/rough-paper-mask.svg?v=major-tears-3');mask-image:url('assets/rough-paper-mask.svg?v=major-tears-3')}
 .preview-notice::after{content:"";position:absolute;z-index:-2;pointer-events:none;left:8%;right:3%;bottom:-14px;height:22px;border-radius:50%;background:#171c2630;filter:blur(15px);transform:rotate(-1deg)}
 .preview-notice .eyebrow,.preview-notice h3,.preview-notice strong,.preview-notice a{color:#17191d}.preview-notice p{color:#50545b}
 @media(max-width:640px){.preview-notice{filter:drop-shadow(1px 2px 1px #15192320) drop-shadow(5px 10px 8px #15192326)}}
