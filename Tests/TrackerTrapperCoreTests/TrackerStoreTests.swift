@@ -64,4 +64,20 @@ final class TrackerStoreTests: XCTestCase {
         let snapshot = await store.read(); XCTAssertEqual(snapshot.events.count, 1)
         try? FileManager.default.removeItem(at: url)
     }
+
+    func testRegistrationRetrySurvivesRestartAndClearsAfterRecovery() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tracker-\(UUID().uuidString).json")
+        let store = try TrackerStore(url: url)
+        let retry = RegistrationRetry(repository: "org/repo", issueNumber: 7, issueURL: "https://github.com/org/repo/issues/7", reason: "temporary import failure")
+        try await store.enqueueRegistrationRetry(retry)
+        let reloaded = try TrackerStore(url: url)
+        let queued = await reloaded.read()
+        XCTAssertEqual(queued.registrationRetries.count, 1)
+        XCTAssertEqual(queued.registrationRetries[0].id, retry.id)
+        XCTAssertEqual(queued.registrationRetries[0].reason, retry.reason)
+        try await reloaded.clearRegistrationRetry(id: retry.id)
+        let cleared = await reloaded.read()
+        XCTAssertTrue(cleared.registrationRetries.isEmpty)
+        try? FileManager.default.removeItem(at: url)
+    }
 }
