@@ -40,8 +40,10 @@ struct TrackerTrapperCLI {
             guard let planID = value(after: "--plan-id", in: args), let agent = value(after: "--agent", in: args), let session = value(after: "--session-id", in: args) else { throw CLIError.usage("start-run requires --plan-id, --agent and --session-id") }
             try printJSON(await store.startRun(planID: planID, agent: agent, sessionID: session, repositoryPath: value(after: "--repo-path", in: args) ?? FileManager.default.currentDirectoryPath))
         case "update-task", "start-task", "complete-task":
-            guard let runID = value(after: "--run-id", in: args), let todoID = value(after: "--todo-id", in: args), let raw = value(after: "--status", in: args), let status = TodoStatus(rawValue: raw) else { throw CLIError.usage("update-task requires --run-id, --todo-id and --status") }
-            let effectiveStatus = command == "start-task" ? TodoStatus.inProgress : command == "complete-task" ? TodoStatus.completed : status
+            guard let runID = value(after: "--run-id", in: args), let todoID = value(after: "--todo-id", in: args) else { throw CLIError.usage("task update requires --run-id and --todo-id") }
+            let suppliedStatus = value(after: "--status", in: args).flatMap(TodoStatus.init(rawValue:))
+            guard command != "update-task" || suppliedStatus != nil else { throw CLIError.usage("update-task requires --status") }
+            let effectiveStatus = command == "start-task" ? TodoStatus.inProgress : command == "complete-task" ? TodoStatus.completed : suppliedStatus!
             try await store.update(runID: runID, todoID: todoID, status: effectiveStatus, message: value(after: "--message", in: args), evidence: values(after: "--evidence", in: args), eventID: value(after: "--event-id", in: args) ?? UUID().uuidString); print("updated")
         case "activity":
             guard let runID = value(after: "--run-id", in: args) else { throw CLIError.usage("activity requires --run-id") }
