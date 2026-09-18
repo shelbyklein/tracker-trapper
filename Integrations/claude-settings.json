@@ -22,6 +22,28 @@
           }
         ]
       }
+    ],
+    "TaskCreated": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "TT_EVENT_MESSAGE='Claude task created' TT_TRACKER_TRAPPER_BIN=/absolute/path/to/.build/arm64-apple-macosx/debug/tracker-trapper TT_RUN_ID=run-id /absolute/path/to/Integrations/report-event.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "TT_EVENT_MESSAGE='Claude task completed' TT_TRACKER_TRAPPER_BIN=/absolute/path/to/.build/arm64-apple-macosx/debug/tracker-trapper TT_RUN_ID=run-id /absolute/path/to/Integrations/report-event.sh",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
