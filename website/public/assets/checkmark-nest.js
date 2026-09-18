@@ -37,6 +37,22 @@ function play(){
     finish();started=true;if(!hasGSAP||motion.matches)return;
     clock.time=0;flight=gsap.timeline({onComplete:finish});
     flight.to(clock,{time:SCENE_DURATION,duration:DURATION,ease:'none',onUpdate:()=>render(clock.time)},0);
+    flock.hidden=false;
+    const bounds=canvas.getBoundingClientRect();
+    const count=innerWidth<640?3:5;
+    for(let i=0;i<count;i++){
+        const img=document.createElement('img');
+        const size=(innerWidth<640?58:76)+Math.random()*24;
+        img.src=root.dataset.flockSrc;img.alt='';img.width=size;img.height=size;
+        img.style.filter=`hue-rotate(${[0,95,-18,120,25][i]}deg)`;
+        flock.append(img);
+        const startX=innerWidth+size,endX=-size*1.5;
+        const y=Math.max(size,Math.min(innerHeight-size*2,bounds.top+bounds.height*.35+i*size*.45));
+        const lift=45+Math.random()*80;
+        gsap.set(img,{x:startX,y});
+        const path=`M ${startX} ${y} C ${innerWidth*.72} ${Math.max(10,y-lift)} ${innerWidth*.28} ${Math.min(innerHeight-size,y+lift*.4)} ${endX} ${Math.max(10,y-lift*.5)}`;
+        flight.to(img,{duration:5.2+Math.random()*1.3,ease:'none',motionPath:{path,autoRotate:false}},i*.22);
+    }
     button.textContent='Pause flight';button.setAttribute('aria-label','Pause the checkmark bird and flock flight');
 }
 button.hidden=!hasGSAP;button.addEventListener('click',()=>{if(flight)finish();else play()});render(SCENE_DURATION);
