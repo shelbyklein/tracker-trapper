@@ -1,0 +1,1 @@
+Built-in image generation. Prompt: Fill a wide 3:2 image edge to edge with clean bright white paper, lightly crumpled then flattened. Delicate angular shallow creases, fine fibers, subtle neutral gray shadows and white highlights. Upper-left lighting, orthographic view, low contrast behind dark paragraph text. No sheet boundary, objects, lettering, beige tint or dark valleys.
