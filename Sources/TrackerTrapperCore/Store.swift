@@ -63,8 +63,11 @@ public actor TrackerStore {
 
     public func finishRun(runID: String, status: RunStatus, message: String? = nil) throws {
         guard let index = snapshot.runs.firstIndex(where: { $0.id == runID }) else { throw StoreError.notFound("run \(runID)") }
+        let planID = snapshot.runs[index].planID
+        let unresolved = snapshot.plans.first(where: { $0.id == planID })?.todos.filter { $0.status != .completed && $0.status != .skipped }.map(\.id) ?? []
+        let reconciliation = unresolved.isEmpty ? message : message ?? "unresolved todos: \(unresolved.joined(separator: ", "))"
         snapshot.runs[index].status = status; snapshot.runs[index].endedAt = .now; snapshot.runs[index].lastActivityAt = .now
-        appendEvent(ProgressEvent(type: "run_\(status.rawValue)", planID: snapshot.runs[index].planID, runID: runID, message: message)); try persist()
+        appendEvent(ProgressEvent(type: "run_\(status.rawValue)", planID: planID, runID: runID, message: reconciliation)); try persist()
     }
 
     public func acknowledgeOutbox() throws { snapshot.outbox.removeAll(); try persist() }

@@ -32,4 +32,15 @@ final class TrackerStoreTests: XCTestCase {
         let runs = await store.read().runs; XCTAssertEqual(Set(runs.map(\.repositoryPath)), Set(["/tmp/one", "/tmp/two"]))
         try? FileManager.default.removeItem(at: url)
     }
+
+    func testFinishingRunReportsUnresolvedTodos() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tracker-\(UUID().uuidString).json")
+        let store = try TrackerStore(url: url)
+        let plan = try await store.register(Plan(repository: "org/repo", issueNumber: 4, issueURL: "", title: "Test", todos: [Todo(id: "TT-01", description: "Open")]))
+        let run = try await store.startRun(planID: plan.id, agent: "fixture", sessionID: "finish", repositoryPath: "/tmp/finish")
+        try await store.finishRun(runID: run.id, status: .finished)
+        let event = (await store.read()).events.last
+        XCTAssertEqual(event?.type, "run_finished"); XCTAssertEqual(event?.message, "unresolved todos: TT-01")
+        try? FileManager.default.removeItem(at: url)
+    }
 }
