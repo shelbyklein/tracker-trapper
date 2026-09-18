@@ -46,6 +46,9 @@ struct TrackerTrapperCLI {
         case "activity":
             guard let runID = value(after: "--run-id", in: args) else { throw CLIError.usage("activity requires --run-id") }
             try await store.update(runID: runID, todoID: nil, status: nil, message: value(after: "--message", in: args), evidence: values(after: "--evidence", in: args), eventID: value(after: "--event-id", in: args) ?? UUID().uuidString); print("recorded")
+        case "record-sync":
+            guard let planID = value(after: "--plan-id", in: args), let hash = value(after: "--hash", in: args) else { throw CLIError.usage("record-sync requires --plan-id and --hash") }
+            try await store.recordSync(planID: planID, hash: hash); print("recorded")
         case "finish-run":
             guard let runID = value(after: "--run-id", in: args), let raw = value(after: "--status", in: args), let status = RunStatus(rawValue: raw) else { throw CLIError.usage("finish-run requires --run-id and --status") }
             try await store.finishRun(runID: runID, status: status, message: value(after: "--message", in: args)); print("finished")

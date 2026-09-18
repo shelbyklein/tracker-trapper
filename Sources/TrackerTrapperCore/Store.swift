@@ -72,6 +72,11 @@ public actor TrackerStore {
 
     public func acknowledgeOutbox() throws { snapshot.outbox.removeAll(); try persist() }
 
+    public func recordSync(planID: String, hash: String) throws {
+        guard let index = snapshot.plans.firstIndex(where: { $0.id == planID }) else { throw StoreError.notFound("plan \(planID)") }
+        snapshot.plans[index].lastSyncedProgressHash = hash; try persist()
+    }
+
     private func appendEvent(_ event: ProgressEvent) { if !snapshot.events.contains(where: { $0.id == event.id }) { snapshot.events.append(event); snapshot.outbox.append(event) } }
 
     private func persist() throws {

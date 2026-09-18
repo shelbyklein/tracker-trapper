@@ -83,7 +83,7 @@ The GitHub tracking issue is the authoritative execution checklist for this plan
 
 ### Phase 5 — GitHub synchronization
 
-- [ ] **TT-12 — Import and synchronize registered issue plans.** Support checklist import with persistent ID mapping, scoped credentials, a designated synchronization section/comment, and queued updates. Check: completed tasks persist to GitHub; human edits elsewhere survive; simultaneous remote edits produce reconciliation/conflict handling instead of blind whole-body overwrite; comments are updated rather than posted for every event.
+- [x] **TT-12 — Import and synchronize registered issue plans.** Support checklist import with persistent ID mapping, scoped credentials, a designated synchronization section/comment, and queued updates. Check: completed tasks persist to GitHub; human edits elsewhere survive; simultaneous remote edits produce reconciliation/conflict handling instead of blind whole-body overwrite; comments are updated rather than posted for every event. Evidence: `import-issue` preserves 16 stable TT IDs and checked states; the sync script writes the designated block using `gh` credentials, records a last-synced hash, preserves the original issue body, and a deliberate remote block edit was refused with exit status 3 before `--force` was used for recovery. The implementation uses one owned body block, so no per-event comments are posted.
 - [ ] **TT-13 — Expose sync and recovery status.** Add outbox retry/backoff, offline state, credential-expiry handling and manual retry. Check: offline updates survive restart and sync once on reconnection; auth failures stop retry storms; UI distinguishes saved locally from synchronized to GitHub.
 
 ### Phase 6 — Acceptance and handoff
