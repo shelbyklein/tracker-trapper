@@ -35,23 +35,37 @@ const hasGSAP=Boolean(window.gsap&&window.MotionPathPlugin);if(hasGSAP)gsap.regi
 function finish(){if(flight){flight.kill();flight=null}flock.hidden=true;flock.replaceChildren();render(SCENE_DURATION);button.textContent='Replay flight';button.setAttribute('aria-label','Replay the checkmark bird and flock flight');}
 function play(){
     finish();started=true;if(!hasGSAP||motion.matches)return;
-    clock.time=0;flight=gsap.timeline({onComplete:finish});
+    const FLOCK_DURATION=4.5,w=innerWidth,h=innerHeight,rect=canvas.getBoundingClientRect();
+    const center=Math.max(h*.24,Math.min(h*.64,rect.top+rect.height*.35));
+    const count=w<640?16:27,random=(min,max)=>min+Math.random()*(max-min);
+    const limitY=y=>Math.max(48,Math.min(h-90,y));clock.time=0;flock.hidden=false;
+    flight=gsap.timeline({onComplete:finish});
     flight.to(clock,{time:SCENE_DURATION,duration:DURATION,ease:'none',onUpdate:()=>render(clock.time)},0);
-    flock.hidden=false;
-    const bounds=canvas.getBoundingClientRect();
-    const count=innerWidth<640?3:5;
+    // Loose shared groups provide cohesion; independent offsets keep the flock irregular.
+    const groups=Array.from({length:4},()=>({height:random(-h*.17,h*.17),delay:random(.05,.95),bend:random(-70,70)}));
     for(let i=0;i<count;i++){
-        const img=document.createElement('img');
-        const size=(innerWidth<640?58:76)+Math.random()*24;
-        img.src=root.dataset.flockSrc;img.alt='';img.width=size;img.height=size;
-        img.style.filter=`hue-rotate(${[0,95,-18,120,25][i]}deg)`;
-        flock.append(img);
-        const startX=innerWidth+size,endX=-size*1.5;
-        const y=Math.max(size,Math.min(innerHeight-size*2,bounds.top+bounds.height*.35+i*size*.45));
-        const lift=45+Math.random()*80;
-        gsap.set(img,{x:startX,y});
-        const path=`M ${startX} ${y} C ${innerWidth*.72} ${Math.max(10,y-lift)} ${innerWidth*.28} ${Math.min(innerHeight-size,y+lift*.4)} ${endX} ${Math.max(10,y-lift*.5)}`;
-        flight.to(img,{duration:5.2+Math.random()*1.3,ease:'none',motionPath:{path,autoRotate:false}},i*.22);
+        const group=groups[Math.floor(random(0,groups.length))];
+        const depth=Math.random(),size=(w<640?24:27)+depth*(w<640?24:34);
+        const img=document.createElement('img');img.src=root.dataset.flockSrc;img.alt='';
+        img.width=Math.round(size);img.height=Math.round(size);img.draggable=false;
+        // Mid-distance birds stay sharp; distant and close birds soften.
+        const blur=depth<.35?(.35-depth)*5:depth>.78?(depth-.78)*9:0;
+        img.style.filter=`hue-rotate(${random(-20,20).toFixed(2)}deg) blur(${blur.toFixed(2)}px)`;
+        img.style.zIndex=String(Math.round(depth*100));flock.append(img);
+        const stray=i%6===0?random(-h*.13,h*.13):0;
+        const y0=limitY(center+group.height+random(-65,65)+stray);
+        const y1=limitY(y0+group.bend+random(-85,85));
+        const y2=limitY(y0-group.bend*.6+random(-100,100));
+        const y3=limitY(y0+random(-90,90));
+        const startX=-size-random(20,w*.18),endX=w+size+30;
+        const x1=w*random(.22,.36),x2=w*random(.60,.76);
+        const delay=Math.max(0,Math.min(1.2,group.delay+random(-.25,.35)));
+        // Stagger exits as well as entrances; the final bird clears with the nest scene.
+        const end=i===count-1?FLOCK_DURATION:random(3.55,FLOCK_DURATION);
+        const curve=`M ${startX} ${y0} C ${w*.04} ${y0+random(-35,35)} ${x1-w*.12} ${y1} ${x1} ${y1} S ${x2-w*.12} ${y2} ${x2} ${y2} S ${w*.95} ${y3} ${endX} ${y3}`;
+        // The source GIF faces left; mirror it to face along the new left-to-right path.
+        gsap.set(img,{x:startX,y:y0,scaleX:-1,opacity:.68+depth*.32,transformOrigin:'50% 50%'});
+        flight.to(img,{duration:end-delay,ease:'sine.inOut',motionPath:{path:curve,autoRotate:true}},delay);
     }
     button.textContent='Pause flight';button.setAttribute('aria-label','Pause the checkmark bird and flock flight');
 }
