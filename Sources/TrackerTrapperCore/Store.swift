@@ -2,6 +2,7 @@ import Foundation
 import Darwin
 
 public actor TrackerStore {
+    public static let currentSchemaVersion = 2
     public nonisolated let url: URL
     private var snapshot: StoreSnapshot
     private let encoder: JSONEncoder
@@ -14,6 +15,9 @@ public actor TrackerStore {
             let data = try Data(contentsOf: url)
             let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
             self.snapshot = try decoder.decode(StoreSnapshot.self, from: data)
+            guard snapshot.schemaVersion <= Self.currentSchemaVersion else {
+                throw StoreError.conflict("store schema \(snapshot.schemaVersion) is newer than this app supports")
+            }
         } else {
             self.snapshot = StoreSnapshot()
         }
@@ -31,7 +35,12 @@ public actor TrackerStore {
 
     @discardableResult public func register(_ plan: Plan) throws -> Plan {
         try transaction {
-        if let index = snapshot.plans.firstIndex(where: { $0.repository == plan.repository && $0.issueNumber == plan.issueNumber }) {
+        try validate(plan)
+        let matchingIndex = snapshot.plans.firstIndex { existing in
+            if plan.source == .local { return existing.source == .local && existing.creationRequestKey == plan.creationRequestKey }
+            return existing.source == .github && existing.repository == plan.repository && existing.issueNumber == plan.issueNumber
+        }
+        if let index = matchingIndex {
             var existing = snapshot.plans[index]
             let incomingIDs = Set(plan.todos.map(\.id))
             let existingIDs = Set(existing.todos.map(\.id))
@@ -49,11 +58,19 @@ public actor TrackerStore {
         }
     }
 
+    @discardableResult public func registerLocal(title: String, todos: [Todo], workspacePath: String?, creationRequestKey: String) throws -> Plan {
+        guard !creationRequestKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw StoreError.conflict("creation request key must not be empty")
+        }
+        return try register(Plan(title: title, todos: todos, workspacePath: workspacePath, creationRequestKey: creationRequestKey))
+    }
+
     /// Pull the authoritative checklist without deleting historical IDs or
     /// resetting newer local progress that has not reached GitHub yet.
     public func reconcileGitHubChecklist(planID: String, title: String, todos: [Todo]) throws {
         try transaction {
             guard let index = snapshot.plans.firstIndex(where: { $0.id == planID }) else { throw StoreError.notFound(planID) }
+            guard snapshot.plans[index].source == .github else { throw StoreError.conflict("local plans cannot be refreshed from GitHub") }
             guard Set(todos.map(\.id)).count == todos.count else { throw StoreError.conflict("GitHub checklist contains duplicate todo IDs") }
             var plan = snapshot.plans[index]
             let before = plan
@@ -97,6 +114,7 @@ public actor TrackerStore {
     public func startRun(planID: String, agent: String, sessionID: String, repositoryPath: String) throws -> Run {
         try transaction {
         guard snapshot.plans.contains(where: { $0.id == planID }) else { throw StoreError.notFound("plan \(planID)") }
+        if let existing = snapshot.runs.first(where: { $0.planID == planID && $0.sessionID == sessionID && $0.status == .active }) { return existing }
         let run = Run(planID: planID, agent: agent, sessionID: sessionID, repositoryPath: repositoryPath)
         snapshot.runs.append(run); appendEvent(ProgressEvent(type: "run_started", planID: planID, runID: run.id)); try persist(); return run
         }
@@ -161,7 +179,29 @@ public actor TrackerStore {
     public func recordSync(planID: String, hash: String) throws {
         try transaction {
         guard let index = snapshot.plans.firstIndex(where: { $0.id == planID }) else { throw StoreError.notFound("plan \(planID)") }
+        guard snapshot.plans[index].source == .github else { throw StoreError.conflict("local plans cannot be synchronized to GitHub") }
         snapshot.plans[index].lastSyncedProgressHash = hash; try persist()
+        }
+    }
+
+    public func setTrackingSettings(_ settings: TrackingSettings) throws -> TrackingSettings {
+        try transaction { snapshot.trackingSettings = settings; try persist(); return settings }
+    }
+
+    public func sessionTracking(client: String, sessionID: String) throws -> SessionTracking? {
+        try transaction { snapshot.sessionTracking.first { $0.client == client && $0.sessionID == sessionID } }
+    }
+
+    @discardableResult public func setSessionTracking(_ tracking: SessionTracking) throws -> SessionTracking {
+        try transaction {
+            guard !tracking.client.isEmpty, !tracking.sessionID.isEmpty else { throw StoreError.conflict("client and session ID must not be empty") }
+            if let planID = tracking.planID, !snapshot.plans.contains(where: { $0.id == planID }) { throw StoreError.notFound("plan \(planID)") }
+            if let runID = tracking.runID, !snapshot.runs.contains(where: { $0.id == runID }) { throw StoreError.notFound("run \(runID)") }
+            if let index = snapshot.sessionTracking.firstIndex(where: { $0.client == tracking.client && $0.sessionID == tracking.sessionID }) {
+                var saved = tracking; saved.updatedAt = .now; snapshot.sessionTracking[index] = saved
+            } else { snapshot.sessionTracking.append(tracking) }
+            try persist()
+            return snapshot.sessionTracking.first { $0.client == tracking.client && $0.sessionID == tracking.sessionID }!
         }
     }
 
@@ -218,6 +258,9 @@ public actor TrackerStore {
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
         if FileManager.default.fileExists(atPath: url.path) {
             snapshot = try decoder.decode(StoreSnapshot.self, from: Data(contentsOf: url))
+            guard snapshot.schemaVersion <= Self.currentSchemaVersion else {
+                throw StoreError.conflict("store schema \(snapshot.schemaVersion) is newer than this app supports")
+            }
         } else {
             snapshot = StoreSnapshot()
         }
@@ -233,10 +276,32 @@ public actor TrackerStore {
         catch { snapshot = before; throw error }
     }
 
-    private func appendEvent(_ event: ProgressEvent) { if !snapshot.events.contains(where: { $0.id == event.id }) { snapshot.events.append(event); snapshot.outbox.append(event) } }
+    private func appendEvent(_ event: ProgressEvent) {
+        guard !snapshot.events.contains(where: { $0.id == event.id }) else { return }
+        snapshot.events.append(event)
+        if snapshot.plans.first(where: { $0.id == event.planID })?.source == .github { snapshot.outbox.append(event) }
+    }
+
+    private func validate(_ plan: Plan) throws {
+        guard !plan.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw StoreError.conflict("plan title must not be empty") }
+        guard Set(plan.todos.map(\.id)).count == plan.todos.count else { throw StoreError.conflict("plan contains duplicate todo IDs") }
+        guard plan.todos.allSatisfy({ !$0.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !$0.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            throw StoreError.conflict("todo IDs and descriptions must not be empty")
+        }
+        if plan.source == .github {
+            guard !plan.repository.isEmpty, plan.issueNumber > 0 else { throw StoreError.conflict("GitHub plans require repository and issue number") }
+        } else {
+            guard let key = plan.creationRequestKey, !key.isEmpty else { throw StoreError.conflict("local plans require a creation request key") }
+        }
+    }
 
     private func persist() throws {
         let directory = url.deletingLastPathComponent(); try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        if snapshot.schemaVersion < Self.currentSchemaVersion, FileManager.default.fileExists(atPath: url.path) {
+            let backup = url.appendingPathExtension("schema-\(snapshot.schemaVersion).backup")
+            if !FileManager.default.fileExists(atPath: backup.path) { try FileManager.default.copyItem(at: url, to: backup) }
+        }
+        snapshot.schemaVersion = Self.currentSchemaVersion
         let data = try encoder.encode(snapshot); let temp = url.appendingPathExtension("tmp")
         try data.write(to: temp, options: .atomic); if FileManager.default.fileExists(atPath: url.path) { _ = try FileManager.default.replaceItemAt(url, withItemAt: temp) } else { try FileManager.default.moveItem(at: temp, to: url) }
     }

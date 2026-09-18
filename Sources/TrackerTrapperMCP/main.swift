@@ -37,6 +37,12 @@ struct TrackerTrapperMCP {
     static var tools: [[String: Any]] {
         [
         tool("register_plan", "Register or update a GitHub issue plan with stable todo IDs", ["repository": "string", "issueNumber": "integer", "issueURL": "string", "title": "string", "todos": "array"]),
+        tool("register_local_plan", "Register or retrieve a local plan without GitHub. creationRequestKey makes retries idempotent", ["title": "string", "todos": "array", "workspacePath": "string", "creationRequestKey": "string"]),
+        tool("list_local_plans", "List persistent local plans for explicit resumption", [:]),
+        tool("get_tracking_settings", "Read whether new interactive sessions should offer local tracking", [:]),
+        tool("set_tracking_settings", "Enable or disable the local-tracking question for future sessions", ["askAtSessionStart": "boolean"]),
+        tool("get_session_tracking", "Read the tracking decision and binding for one client session", ["client": "string", "sessionID": "string"]),
+        tool("set_session_tracking", "Persist a pending, declined or accepted session decision and optional plan/run binding", ["client": "string", "sessionID": "string", "decision": "string", "planID": "string", "runID": "string", "creationRequestKey": "string"]),
         tool("get_plan", "Read a persistent plan and its current progress", ["planID": "string"]),
         tool("start_run", "Associate an agent session with a plan", ["planID": "string", "agent": "string", "sessionID": "string", "repositoryPath": "string"]),
         tool("watch_session", "Link this run to its own local session JSONL file. The menu-bar app watches new output without requiring repeated reporting. format must be codex or claude; sourcePath must be absolute. Historical records are skipped.", ["runID": "string", "sourcePath": "string", "format": "string"]),
@@ -63,6 +69,25 @@ struct TrackerTrapperMCP {
             let todos = (args["todos"] as? [[String: Any]] ?? []).map { Todo(id: $0["id"] as? String ?? UUID().uuidString, description: $0["description"] as? String ?? "", acceptance: $0["acceptance"] as? String ?? "") }
             let plan = Plan(repository: try string("repository", args), issueNumber: try integer("issueNumber", args), issueURL: try string("issueURL", args), title: try string("title", args), todos: todos)
             return try await store.register(plan).json()
+        case "register_local_plan":
+            let todos = try todoList(args)
+            return try await store.registerLocal(title: string("title", args), todos: todos, workspacePath: args["workspacePath"] as? String, creationRequestKey: string("creationRequestKey", args)).json()
+        case "list_local_plans":
+            return try await store.read().plans.filter { $0.source == .local }.json()
+        case "get_tracking_settings":
+            return try await store.read().trackingSettings.json()
+        case "set_tracking_settings":
+            guard let enabled = args["askAtSessionStart"] as? Bool else { throw MCPError.invalidParams }
+            return try await store.setTrackingSettings(TrackingSettings(askAtSessionStart: enabled)).json()
+        case "get_session_tracking":
+            let value = try await store.sessionTracking(client: string("client", args), sessionID: string("sessionID", args))
+            var result: [String: Any] = ["session": NSNull()]
+            if let value { result["session"] = try value.json() }
+            return result
+        case "set_session_tracking":
+            guard let decision = SessionTrackingDecision(rawValue: try string("decision", args)) else { throw MCPError.invalidParams }
+            let value = SessionTracking(client: try string("client", args), sessionID: try string("sessionID", args), decision: decision, planID: args["planID"] as? String, runID: args["runID"] as? String, creationRequestKey: args["creationRequestKey"] as? String)
+            return try await store.setSessionTracking(value).json()
         case "get_plan":
             let id = try string("planID", args); guard let plan = try await store.read().plans.first(where: { $0.id == id }) else { throw StoreError.notFound(id) }; return try plan.json()
         case "start_run":
@@ -94,6 +119,10 @@ struct TrackerTrapperMCP {
 
     static func string(_ key: String, _ args: [String: Any]) throws -> String { guard let value = args[key] as? String, !value.isEmpty else { throw MCPError.invalidParams }; return value }
     static func integer(_ key: String, _ args: [String: Any]) throws -> Int { guard let value = args[key] as? Int else { throw MCPError.invalidParams }; return value }
+    static func todoList(_ args: [String: Any]) throws -> [Todo] {
+        guard let raw = args["todos"] as? [[String: Any]], !raw.isEmpty else { throw MCPError.invalidParams }
+        return raw.map { Todo(id: $0["id"] as? String ?? "", description: $0["description"] as? String ?? "", acceptance: $0["acceptance"] as? String ?? "") }
+    }
     static func write(_ object: [String: Any]) throws { let data = try JSONSerialization.data(withJSONObject: object); FileHandle.standardOutput.write(data); FileHandle.standardOutput.write("\n".data(using: .utf8)!) }
 }
 

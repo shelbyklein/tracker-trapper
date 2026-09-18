@@ -27,4 +27,11 @@ final class CompletionNoticeTests: XCTestCase {
         XCTAssertEqual(notices.first?.title, "2 todos completed")
         XCTAssertEqual(notices.first?.body, "First\nSecond")
     }
+
+    func testLocalCompletionUsesLocalLabel() {
+        let plan = Plan(title: "Local", todos: [Todo(id: "L-1", description: "Finish")], workspacePath: "/tmp/plain", creationRequestKey: "local")
+        let before = StoreSnapshot(plans: [plan])
+        var after = before; after.plans[0].todos[0].status = .completed
+        XCTAssertEqual(CompletionNotice.changes(from: before, to: after).first?.subtitle, "Local")
+    }
 }

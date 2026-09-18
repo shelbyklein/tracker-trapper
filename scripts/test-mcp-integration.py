@@ -52,6 +52,18 @@ with tempfile.TemporaryDirectory(prefix="tracker-mcp-test-") as directory:
         run = call(processes[0], "start_run", planID=plan_id, agent="test", sessionID="session", repositoryPath=directory)
         schema = rpc(processes[0], "tools/list", {})["tools"]
         assert "nextTodoID" in next(t for t in schema if t["name"] == "complete_task")["inputSchema"]["properties"]
+        assert any(t["name"] == "register_local_plan" for t in schema)
+        assert call(processes[0], "set_tracking_settings", askAtSessionStart=True)["askAtSessionStart"] is True
+        assert call(processes[1], "get_tracking_settings")["askAtSessionStart"] is True
+        local = call(processes[0], "register_local_plan", title="Local integration", workspacePath=directory,
+                     creationRequestKey="mcp-local", todos=[dict(id="TT-LOCAL-MCP-01", description="Verify local MCP")])
+        local_retry = call(processes[1], "register_local_plan", title="Local integration", workspacePath=directory,
+                           creationRequestKey="mcp-local", todos=[dict(id="TT-LOCAL-MCP-01", description="Verify local MCP")])
+        assert local["id"] == local_retry["id"]
+        local_run = call(processes[0], "start_run", planID=local["id"], agent="test", sessionID="local-session", repositoryPath=directory)
+        call(processes[0], "set_session_tracking", client="codex", sessionID="local-session", decision="accepted",
+             planID=local["id"], runID=local_run["id"], creationRequestKey="mcp-local")
+        assert call(processes[1], "get_session_tracking", client="codex", sessionID="local-session")["session"]["runID"] == local_run["id"]
         call(processes[0], "set_next_task", runID=run["id"], nextTodoID="TT-02")
         assert call(processes[1], "get_plan", planID=plan_id)["nextTodoID"] == "TT-02"
         call(processes[0], "report_activity", runID=run["id"], nextTodoID="")
@@ -74,8 +86,10 @@ with tempfile.TemporaryDirectory(prefix="tracker-mcp-test-") as directory:
         assert all(todo["evidence"] == ["integration test"] for todo in saved["todos"])
         error = rpc(processes[0], "tools/call", dict(name="get_plan", arguments=dict(planID="missing")))
         assert error["isError"] is True
-        assert len(json.loads(store.read_text())["plans"]) == 4
-        print("PASS: MCP envelopes, four concurrent processes, fresh reads, concurrent task updates, retries, re-registration, next-task schema/set/clear/atomic rejection/completion, tool errors")
+        saved_store = json.loads(store.read_text())
+        assert len(saved_store["plans"]) == 5
+        assert all(event["planID"] != local["id"] for event in saved_store["outbox"])
+        print("PASS: MCP envelopes, concurrent processes, local/GitHub plans, persistent settings/session binding, outbox isolation, retries, next-task updates, and tool errors")
     finally:
         for process in processes:
             process.stdin.close()

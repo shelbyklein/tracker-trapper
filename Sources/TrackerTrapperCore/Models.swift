@@ -8,6 +8,38 @@ public enum RunStatus: String, Codable, Sendable {
     case active, waitingForUser = "waiting_for_user", paused, interrupted, finished, failed
 }
 
+public enum PlanSource: String, Codable, Sendable {
+    case github, local
+}
+
+public enum SessionTrackingDecision: String, Codable, Sendable {
+    case pending, declined, accepted
+}
+
+public struct TrackingSettings: Codable, Equatable, Sendable {
+    public var askAtSessionStart: Bool
+
+    public init(askAtSessionStart: Bool = false) {
+        self.askAtSessionStart = askAtSessionStart
+    }
+}
+
+public struct SessionTracking: Codable, Identifiable, Equatable, Sendable {
+    public var id: String { "\(client):\(sessionID)" }
+    public let client: String
+    public let sessionID: String
+    public var decision: SessionTrackingDecision
+    public var planID: String?
+    public var runID: String?
+    public var creationRequestKey: String?
+    public var updatedAt: Date
+
+    public init(client: String, sessionID: String, decision: SessionTrackingDecision, planID: String? = nil, runID: String? = nil, creationRequestKey: String? = nil, updatedAt: Date = .now) {
+        self.client = client; self.sessionID = sessionID; self.decision = decision
+        self.planID = planID; self.runID = runID; self.creationRequestKey = creationRequestKey; self.updatedAt = updatedAt
+    }
+}
+
 public struct Todo: Codable, Identifiable, Equatable, Sendable {
     public let id: String
     public var description: String
@@ -36,14 +68,53 @@ public struct Plan: Codable, Identifiable, Equatable, Sendable {
     public var updatedAt: Date
     public var lastSyncedProgressHash: String?
     public var nextTodoID: String?
+    public var source: PlanSource
+    public var workspacePath: String?
+    public var creationRequestKey: String?
 
     public var nextTodo: Todo? {
         todos.first { $0.id == nextTodoID && $0.status != .completed && $0.status != .skipped }
     }
 
+    public var displaySubtitle: String {
+        source == .github ? "\(repository) #\(issueNumber)" : "Local"
+    }
+
+    public var isGitHub: Bool { source == .github }
+
     public init(id: String = UUID().uuidString, repository: String, issueNumber: Int, issueURL: String, title: String, todos: [Todo], revision: Int = 0, updatedAt: Date = .now, lastSyncedProgressHash: String? = nil) {
         self.id = id; self.repository = repository; self.issueNumber = issueNumber; self.issueURL = issueURL
         self.title = title; self.todos = todos; self.revision = revision; self.updatedAt = updatedAt; self.lastSyncedProgressHash = lastSyncedProgressHash
+        self.source = .github; self.workspacePath = nil; self.creationRequestKey = nil
+    }
+
+    public init(localID: String = "local:\(UUID().uuidString)", title: String, todos: [Todo], workspacePath: String? = nil, creationRequestKey: String, revision: Int = 0, updatedAt: Date = .now) {
+        self.id = localID; self.repository = ""; self.issueNumber = 0; self.issueURL = ""
+        self.title = title; self.todos = todos; self.revision = revision; self.updatedAt = updatedAt
+        self.lastSyncedProgressHash = nil; self.nextTodoID = nil; self.source = .local
+        self.workspacePath = workspacePath; self.creationRequestKey = creationRequestKey
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, repository, issueNumber, issueURL, title, todos, revision, updatedAt, lastSyncedProgressHash, nextTodoID
+        case source, workspacePath, creationRequestKey
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        repository = try values.decodeIfPresent(String.self, forKey: .repository) ?? ""
+        issueNumber = try values.decodeIfPresent(Int.self, forKey: .issueNumber) ?? 0
+        issueURL = try values.decodeIfPresent(String.self, forKey: .issueURL) ?? ""
+        title = try values.decode(String.self, forKey: .title)
+        todos = try values.decode([Todo].self, forKey: .todos)
+        revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
+        updatedAt = try values.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
+        lastSyncedProgressHash = try values.decodeIfPresent(String.self, forKey: .lastSyncedProgressHash)
+        nextTodoID = try values.decodeIfPresent(String.self, forKey: .nextTodoID)
+        source = try values.decodeIfPresent(PlanSource.self, forKey: .source) ?? .github
+        workspacePath = try values.decodeIfPresent(String.self, forKey: .workspacePath)
+        creationRequestKey = try values.decodeIfPresent(String.self, forKey: .creationRequestKey)
     }
 }
 
@@ -104,17 +175,22 @@ public struct StoreSnapshot: Codable, Equatable, Sendable {
     public var outbox: [ProgressEvent]
     public var registrationRetries: [RegistrationRetry]
     public var schemaVersion: Int
+    public var trackingSettings: TrackingSettings
+    public var sessionTracking: [SessionTracking]
 
-    public init(plans: [Plan] = [], runs: [Run] = [], events: [ProgressEvent] = [], outbox: [ProgressEvent] = [], registrationRetries: [RegistrationRetry] = [], schemaVersion: Int = 1) {
+    public init(plans: [Plan] = [], runs: [Run] = [], events: [ProgressEvent] = [], outbox: [ProgressEvent] = [], registrationRetries: [RegistrationRetry] = [], schemaVersion: Int = 2, trackingSettings: TrackingSettings = TrackingSettings(), sessionTracking: [SessionTracking] = []) {
         self.plans = plans; self.runs = runs; self.events = events; self.outbox = outbox; self.registrationRetries = registrationRetries; self.schemaVersion = schemaVersion
+        self.trackingSettings = trackingSettings; self.sessionTracking = sessionTracking
     }
 
-    private enum CodingKeys: String, CodingKey { case plans, runs, events, outbox, registrationRetries, schemaVersion }
+    private enum CodingKeys: String, CodingKey { case plans, runs, events, outbox, registrationRetries, schemaVersion, trackingSettings, sessionTracking }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         plans = try values.decode([Plan].self, forKey: .plans); runs = try values.decode([Run].self, forKey: .runs)
         events = try values.decode([ProgressEvent].self, forKey: .events); outbox = try values.decode([ProgressEvent].self, forKey: .outbox)
         registrationRetries = try values.decodeIfPresent([RegistrationRetry].self, forKey: .registrationRetries) ?? []
         schemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        trackingSettings = try values.decodeIfPresent(TrackingSettings.self, forKey: .trackingSettings) ?? TrackingSettings()
+        sessionTracking = try values.decodeIfPresent([SessionTracking].self, forKey: .sessionTracking) ?? []
     }
 }

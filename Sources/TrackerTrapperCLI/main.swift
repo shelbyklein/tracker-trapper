@@ -10,6 +10,15 @@ struct PlanInput: Codable {
     var todos: [TodoInput]
 }
 struct TodoInput: Codable { var id: String; var description: String; var acceptance: String? }
+struct LocalPlanInput: Codable {
+    var title: String
+    var todos: [TodoInput]
+    var workspacePath: String?
+    var creationRequestKey: String
+    var client: String?
+    var sessionID: String?
+    var agent: String?
+}
 
 @main
 struct TrackerTrapperCLI {
@@ -28,6 +37,10 @@ struct TrackerTrapperCLI {
             let input = try JSONDecoder().decode(PlanInput.self, from: data)
             let plan = Plan(id: input.id ?? UUID().uuidString, repository: input.repository, issueNumber: input.issueNumber, issueURL: input.issueURL, title: input.title, todos: input.todos.map { Todo(id: $0.id, description: $0.description, acceptance: $0.acceptance ?? "") })
             try printJSON(await store.register(plan))
+        case "register-local-plan":
+            let input = try JSONDecoder().decode(LocalPlanInput.self, from: readInput(args))
+            let todos = input.todos.map { Todo(id: $0.id, description: $0.description, acceptance: $0.acceptance ?? "") }
+            try printJSON(await store.registerLocal(title: input.title, todos: todos, workspacePath: input.workspacePath, creationRequestKey: input.creationRequestKey))
         case "import-issue":
             guard let repository = value(after: "--repo", in: args), let issue = value(after: "--issue", in: args), let issueNumber = Int(issue) else { throw CLIError.usage("import-issue requires --repo owner/name and --issue number") }
             let imported = try importIssue(repository: repository, issueNumber: issueNumber)
@@ -67,6 +80,36 @@ struct TrackerTrapperCLI {
             guard let id = value(after: "--plan-id", in: args) else { throw CLIError.usage("get-plan requires --plan-id") }
             let result = try await store.read().plans.first { $0.id == id || "\($0.issueNumber)" == id }
             guard let result else { throw StoreError.notFound("plan \(id)") }; try printJSON(result)
+        case "list-local-plans":
+            try printJSON(try await store.read().plans.filter { $0.source == .local })
+        case "tracker":
+            guard let action = args.dropFirst().first else { throw CLIError.usage("tracker requires on, off, start or status") }
+            switch action {
+            case "on", "off":
+                try printJSON(await store.setTrackingSettings(TrackingSettings(askAtSessionStart: action == "on")))
+            case "status":
+                let snapshot = try await store.read()
+                if let client = value(after: "--client", in: args), let sessionID = value(after: "--session-id", in: args) {
+                    struct Status: Encodable { let settings: TrackingSettings; let session: SessionTracking? }
+                    try printJSON(Status(settings: snapshot.trackingSettings, session: snapshot.sessionTracking.first { $0.client == client && $0.sessionID == sessionID }))
+                } else { try printJSON(snapshot.trackingSettings) }
+            case "start":
+                let input = try JSONDecoder().decode(LocalPlanInput.self, from: readInput(args))
+                guard let client = input.client, let sessionID = input.sessionID, let agent = input.agent else {
+                    throw CLIError.usage("tracker start input requires client, sessionID and agent")
+                }
+                let plan = try await store.registerLocal(title: input.title, todos: input.todos.map { Todo(id: $0.id, description: $0.description, acceptance: $0.acceptance ?? "") }, workspacePath: input.workspacePath, creationRequestKey: input.creationRequestKey)
+                let run = try await store.startRun(planID: plan.id, agent: agent, sessionID: sessionID, repositoryPath: input.workspacePath ?? FileManager.default.currentDirectoryPath)
+                _ = try await store.setSessionTracking(SessionTracking(client: client, sessionID: sessionID, decision: .accepted, planID: plan.id, runID: run.id, creationRequestKey: input.creationRequestKey))
+                struct Started: Encodable { let plan: Plan; let run: Run }
+                try printJSON(Started(plan: plan, run: run))
+            default: throw CLIError.usage("tracker requires on, off, start or status")
+            }
+        case "session-tracking":
+            guard let client = value(after: "--client", in: args), let sessionID = value(after: "--session-id", in: args) else { throw CLIError.usage("session-tracking requires --client and --session-id") }
+            if let raw = value(after: "--decision", in: args), let decision = SessionTrackingDecision(rawValue: raw) {
+                try printJSON(await store.setSessionTracking(SessionTracking(client: client, sessionID: sessionID, decision: decision, planID: value(after: "--plan-id", in: args), runID: value(after: "--run-id", in: args), creationRequestKey: value(after: "--creation-request-key", in: args))))
+            } else { try printJSON(await store.sessionTracking(client: client, sessionID: sessionID)) }
         case "start-run":
             guard let planID = value(after: "--plan-id", in: args), let agent = value(after: "--agent", in: args), let session = value(after: "--session-id", in: args) else { throw CLIError.usage("start-run requires --plan-id, --agent and --session-id") }
             try printJSON(await store.startRun(planID: planID, agent: agent, sessionID: session, repositoryPath: value(after: "--repo-path", in: args) ?? FileManager.default.currentDirectoryPath))
@@ -136,6 +179,11 @@ struct TrackerTrapperCLI {
     static func printHelp() { print("""
     tracker-trapper — local plan/progress bridge
     register-plan --input plan.json
+    register-local-plan --input local-plan.json
+    list-local-plans
+    tracker on|off|status
+    tracker start --input local-plan-with-session.json
+    session-tracking --client <codex|claude> --session-id <id> [--decision <pending|declined|accepted>]
     import-issue --repo owner/name --issue 123
     create-issue --repo owner/name --title "Title" --body-file plan.md
     retry-registrations

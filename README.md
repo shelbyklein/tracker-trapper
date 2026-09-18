@@ -1,6 +1,6 @@
 # Tracker Trapper
 
-A macOS menu-bar app for following GitHub issue checklists and agent progress.
+A macOS menu-bar app for following local or GitHub issue checklists and agent progress.
 The app, command-line tool, and local MCP server share one persistent store.
 
 **[Install and use Tracker Trapper on your Mac →](docs/mac-guide.md)**
@@ -25,8 +25,8 @@ scripts/package-app.sh "$(swift build -c release --show-bin-path)/TrackerTrapper
 open dist/TrackerTrapper.app
 ```
 
-Click the checklist icon in the menu bar, or press **⌘⇧T**, to show or hide the
-panel. Keep the app running to refresh progress. There is no automatic login
+Click the checklist icon in the menu bar, or press **⌘⇧T** by default, to show or hide the
+panel. Change the shortcut in **Settings → General**. Keep the app running to refresh progress. There is no automatic login
 service; see the guide for starting it at login yourself.
 
 ## What is available?
@@ -34,6 +34,11 @@ service; see the guide for starting it at login yourself.
 The published source provides the menu-bar panel, stable issue/todo IDs,
 CLI and stdio MCP reporting, durable local progress, hook adapters, and an
 explicit GitHub synchronization script.
+
+Local plans use the same progress workflow without Git or a GitHub account.
+Tracking defaults off and starts only when requested for the current session.
+The `issue-to-work` skill opts its own issue session in automatically. See the
+[agent integration guide](Integrations/README.md#local-plans-and-session-scoped-commands).
 
 The content-sized panel, remaining-only cards, notification bell, background
 session watcher, explicit next-task blue dot, completion celebrations, GitHub

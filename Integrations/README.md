@@ -6,6 +6,37 @@ Core CLI/MCP reporting, hook adapters, background session watching, explicit
 next-task selection, and the **Stop watching** UI are included in source.
 Rebuild and reconnect older MCP clients to load the current tools.
 
+## Local plans and session-scoped commands
+
+Local plans use the same store, runs, stable todo IDs, evidence, watcher, and
+menu-bar cards without requiring Git, `gh`, or a GitHub account. Tracking is
+off by default and no startup hook asks about it. Start it only for the current
+session with the tracker skill or through a workflow that deliberately binds a
+plan and run.
+
+`register-local-plan` and MCP `register_local_plan` require a stable
+`creationRequestKey`; retrying with that key returns the existing plan. Local
+events stay in local history and never enter the GitHub sync outbox.
+
+Install the `Integrations/skills/tracker` folder at
+`~/.agents/skills/tracker` for Codex and `~/.claude/skills/tracker` for Claude
+Code. Codex uses `$tracker on|off|start|status`; Claude Code exposes
+`/tracker on|off|start|status`. `on` and `start` opt in only the current
+session. `off` pauses that session's active run and keeps its saved plan.
+
+Copy the skill after building Tracker Trapper:
+
+```sh
+mkdir -p ~/.agents/skills ~/.claude/skills
+ditto Integrations/skills/tracker ~/.agents/skills/tracker
+ditto Integrations/skills/tracker ~/.claude/skills/tracker
+```
+
+The `issue-to-work` skill uses `set_session_tracking` after it retrieves or
+registers the issue plan and starts the current session run. This binds the
+session without creating a second local plan. Reconnect clients after a rebuild
+so the local-plan and session-binding MCP tools are visible.
+
 ## Background session watcher
 
 The running menu-bar app observes explicitly linked Codex/Claude JSONL sessions every second, including when its popover is closed. This is independent of agent MCP calls. Select **Link session…** on an active run, call MCP `watch_session` with `runID`, absolute `sourcePath`, and `format` (`codex` or `claude`), or run:

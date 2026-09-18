@@ -9,36 +9,80 @@ import TrackerTrapperCore
 struct TrackerTrapperMenuBar: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     var body: some Scene {
-        Settings { EmptyView() }
+        Settings { SettingsView(model: appDelegate.model) }
     }
 }
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate, NSPopoverDelegate {
-    private let model = MenuModel()
+    let model = MenuModel()
+    private var settingsController: TrackerSettingsWindow?
     private let popover = NSPopover()
+    private let celebrationPanel = CompletionPopoutController()
     private var statusItem: NSStatusItem?
     private var hotKey: EventHotKeyRef?
+    private var nextHotKeyID: UInt32 = 1
     private var eventHandler: EventHandlerRef?
+    private var shortcutObserver: NSObjectProtocol?
     private var refreshTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         UNUserNotificationCenter.current().delegate = self
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        Task { await NotificationService.shared.refresh() }
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.model.refresh() }
         }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem?.button?.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Tracker Trapper")
         statusItem?.button?.image?.isTemplate = true
-        statusItem?.button?.toolTip = "Tracker Trapper (⌘⇧T)"
+        updateShortcutLabel()
         statusItem?.button?.target = self; statusItem?.button?.action = #selector(togglePopover)
-        popover.behavior = .transient; popover.animates = true; popover.contentViewController = NSHostingController(rootView: MenuContent(model: model, onHeightChange: { [weak self] height in
+        popover.behavior = .transient; popover.animates = true; popover.contentViewController = NSHostingController(rootView: MenuContent(model: model, onSettings: { [weak self] in self?.showSettings() }, onHeightChange: { [weak self] height in
             guard let self, abs(self.popover.contentSize.height - height) > 0.5 else { return }
             self.popover.contentSize = NSSize(width: 420, height: height)
         }))
         popover.delegate = self
+        model.celebrationPresenter = { [weak self] plan in
+            guard let self, let button = self.statusItem?.button else { return false }
+            return self.celebrationPanel.show(plan: plan, isClosedIssue: self.model.celebrations.isClosedIssue(plan.id),
+                                             run: self.model.snapshot.runs.filter { $0.planID == plan.id }.max { $0.lastActivityAt < $1.lastActivityAt },
+                                             anchoredTo: button) { [weak self] in self?.model.dismissCelebration() }
+        }
+        model.todoCelebrationPresenter = { [weak self] celebration in
+            guard let self, let button = self.statusItem?.button else { return false }
+            return self.celebrationPanel.show(todo: celebration, anchoredTo: button) { [weak self] in self?.model.dismissCelebration() }
+        }
+        model.celebrationDismissal = { [weak self] in self?.celebrationPanel.hide() }
         registerHotKey()
+        shortcutObserver = NotificationCenter.default.addObserver(forName: KeyboardShortcutSettings.changed, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.registerHotKey() }
+        }
+    }
+
+    @objc func showSettings() {
+        popover.performClose(nil)
+        if settingsController == nil {
+            settingsController = TrackerSettingsWindow(
+                model: model,
+                onTestCheckboxPopup: { [weak self] in self?.showTestPopup(isCheckbox: true) },
+                onTestTaskListPopup: { [weak self] in self?.showTestPopup(isCheckbox: false) }
+            )
+        }
+        settingsController?.reveal()
+    }
+
+    private func showTestPopup(isCheckbox: Bool) {
+        guard let button = statusItem?.button else { return }
+        let dismiss: () -> Void = { [weak self] in self?.celebrationPanel.hide() }
+        if isCheckbox {
+            _ = celebrationPanel.showTestCheckbox(anchoredTo: button, onDismiss: dismiss)
+        } else {
+            _ = celebrationPanel.showTestTaskList(anchoredTo: button, onDismiss: dismiss)
+        }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Task { await NotificationService.shared.refresh() }
     }
 
     @objc private func togglePopover() {
@@ -59,16 +103,31 @@ struct TrackerTrapperMenuBar: App {
     }
 
     private func registerHotKey() {
-        let id = EventHotKeyID(signature: OSType(0x54545250), id: 1)
-        RegisterEventHotKey(UInt32(kVK_ANSI_T), UInt32(cmdKey | shiftKey), id, GetApplicationEventTarget(), 0, &hotKey)
-        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        let callback: EventHandlerUPP = { _, _, userData in
-            guard let userData else { return noErr }
-            let delegate = Unmanaged<AppDelegate>.fromOpaque(userData).takeUnretainedValue()
-            Task { @MainActor in delegate.togglePopover() }
-            return noErr
+        let shortcut = KeyboardShortcutSettings.shared.shortcut
+        nextHotKeyID &+= 1
+        let id = EventHotKeyID(signature: OSType(0x54545250), id: nextHotKeyID)
+        var replacement: EventHotKeyRef?
+        let status = RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers, id, GetApplicationEventTarget(), 0, &replacement)
+        if status == noErr, let replacement {
+            if let hotKey { UnregisterEventHotKey(hotKey) }
+            hotKey = replacement
         }
-        InstallEventHandler(GetApplicationEventTarget(), callback, 1, &eventType, Unmanaged.passUnretained(self).toOpaque(), &eventHandler)
+        KeyboardShortcutSettings.shared.registrationError = status == noErr ? nil : "That shortcut is unavailable. Choose another combination."
+        updateShortcutLabel()
+        if eventHandler == nil {
+            var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            let callback: EventHandlerUPP = { _, _, userData in
+                guard let userData else { return noErr }
+                let delegate = Unmanaged<AppDelegate>.fromOpaque(userData).takeUnretainedValue()
+                Task { @MainActor in delegate.togglePopover() }
+                return noErr
+            }
+            InstallEventHandler(GetApplicationEventTarget(), callback, 1, &eventType, Unmanaged.passUnretained(self).toOpaque(), &eventHandler)
+        }
+    }
+
+    private func updateShortcutLabel() {
+        statusItem?.button?.toolTip = "Tracker Trapper (\(KeyboardShortcutSettings.shared.shortcut.displayName))"
     }
 
     func popoverDidShow(_ notification: Notification) {
@@ -81,12 +140,14 @@ struct TrackerTrapperMenuBar: App {
 
     func applicationWillTerminate(_ notification: Notification) {
         refreshTimer?.invalidate()
+        celebrationPanel.hide()
         if let hotKey { UnregisterEventHotKey(hotKey) }
         if let eventHandler { RemoveEventHandler(eventHandler) }
+        if let shortcutObserver { NotificationCenter.default.removeObserver(shortcutObserver) }
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
+        notification.request.content.sound == nil ? [.banner, .list] : [.banner, .list, .sound]
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
@@ -103,11 +164,16 @@ struct TrackerTrapperMenuBar: App {
     @Published var snapshot = StoreSnapshot()
     @Published private(set) var celebrations = CompletionCelebrations()
     @Published private(set) var celebratingID: String?
+    @Published private(set) var celebratingTodoID: String?
     private var celebrationTask: Task<Void, Never>?
+    var celebrationPresenter: ((Plan) -> Bool)?
+    var todoCelebrationPresenter: ((TodoCompletionCelebration) -> Bool)?
+    var celebrationDismissal: (() -> Void)?
     private var panelIsOpen = false
     private var celebrationStateURL: URL?
     @Published private(set) var celebrationError: String?
     private let checksGitHub: Bool
+    private let celebrationsEnabled: () -> Bool
     private let notificationHandler: ((String, String, String) -> Void)?
     @Published var error: String?
     @Published private(set) var attentionItems: [String] = []
@@ -119,6 +185,8 @@ struct TrackerTrapperMenuBar: App {
     private var lastIssueChecks: [String: Date] = [:]
     private var hasLoadedSnapshot = false
     private var dismissedAttentionKeys = Set<String>()
+    private var observedAttentionKeys = Set<String>()
+    @Published private(set) var lastRefreshAt: Date?
     private var refreshInFlight = false
     private var refreshTask: Task<Void, Never>?
     private var issueCheckTask: Task<Void, Never>?
@@ -133,9 +201,11 @@ struct TrackerTrapperMenuBar: App {
     let watcher: SessionWatcher?
     init(store suppliedStore: TrackerStore? = nil, checksGitHub: Bool = true,
          notificationHandler: ((String, String, String) -> Void)? = nil,
-         githubStatusCheck: ((Plan) async throws -> Bool)? = nil) {
+         githubStatusCheck: ((Plan) async throws -> Bool)? = nil,
+         celebrationsEnabled: @escaping () -> Bool = { UserDefaults.standard.object(forKey: "celebrations.enabled") as? Bool ?? true }) {
         self.githubStatusCheck = githubStatusCheck
         self.checksGitHub = checksGitHub
+        self.celebrationsEnabled = celebrationsEnabled
         self.notificationHandler = notificationHandler
         let opened = suppliedStore ?? (try? TrackerStore())
         store = opened; watcher = opened.map { SessionWatcher(store: $0) }
@@ -154,7 +224,7 @@ struct TrackerTrapperMenuBar: App {
             defer { refreshInFlight = false }
             do {
             let source = try await store.read()
-            checkGitHubIssues(source.plans)
+            checkGitHubIssues(source.plans.filter(\.isGitHub))
             if let watcher {
                 do {
                     let closedRunIDs = Set(source.runs.filter { closedIssueIDs.contains($0.planID) || celebrations.dismissedPlanIDs.contains($0.planID) }.map(\.id))
@@ -166,7 +236,7 @@ struct TrackerTrapperMenuBar: App {
                     watcherError = failures.isEmpty ? nil : failures.map { watch in
                         let run = source.runs.first { $0.id == watch.runID }
                         let plan = source.plans.first { $0.id == run?.planID }
-                        let name = plan.map { "\($0.repository) #\($0.issueNumber)" } ?? "Session"
+                        let name = plan?.displaySubtitle ?? "Session"
                         return "\(name): \(watch.status)"
                     }.joined(separator: "\n")
                 }
@@ -174,22 +244,29 @@ struct TrackerTrapperMenuBar: App {
             }
             let current = try await store.read()
             let previousCelebrations = celebrations
-            celebrations.observe(visibleSnapshot(current, includingCelebrated: true).plans)
+            celebrations.observe(visibleSnapshot(current, includingCelebrated: true, includingClosed: true).plans)
             if celebrations != previousCelebrations { saveCelebrations() }
             if let id = celebratingID, !celebrations.pending.contains(where: { $0.id == id }) { cancelCelebration() }
+            if let id = celebratingTodoID, !celebrations.pendingTodos.contains(where: { $0.id == id }) { cancelCelebration() }
             let next = visibleSnapshot(current)
-            let oldKeys = Set(attentionKeys(for: snapshot))
+            let oldKeys = observedAttentionKeys
             let newKeys = Set(attentionKeys(for: next))
+            let knownPlans = Set(snapshot.plans.map(\.id))
             let completions = CompletionNotice.changes(from: hasLoadedSnapshot ? snapshot : nil, to: next)
             snapshot = next
-            startCelebrationIfNeeded()
+            dismissedAttentionKeys.formIntersection(newKeys)
+            observedAttentionKeys = newKeys
             attentionItems = Array(newKeys.subtracting(dismissedAttentionKeys)).sorted()
-            for notice in completions { deliverNotification(title: notice.title, subtitle: notice.subtitle, body: notice.body) }
+            for notice in completions { deliverNotification(title: notice.title, subtitle: notice.subtitle, body: notice.body, kind: .completion) }
             if hasLoadedSnapshot {
-                // Completion has its own useful message; don't also send a generic alert.
-                notify(for: Set(newKeys.subtracting(oldKeys).filter { !$0.hasSuffix(":complete") }))
+                let notices = AttentionNotice.current(next).filter { knownPlans.contains($0.planID) && !oldKeys.contains($0.id) }
+                for notice in notices where !dismissedAttentionKeys.contains(notice.id) {
+                    deliverNotification(title: "Tracker Trapper", subtitle: notice.subtitle, body: notice.body, kind: notice.isStale ? .stale : .attention)
+                }
             }
             hasLoadedSnapshot = true
+            lastRefreshAt = .now
+            startCelebrationIfNeeded()
             error = nil
             } catch { self.error = "Unable to refresh local store: \(error.localizedDescription)" }
         }
@@ -227,7 +304,7 @@ struct TrackerTrapperMenuBar: App {
     }
     private func checkGitHubIssues(_ plans: [Plan]) {
         guard checksGitHub, !issueChecksInFlight else { return }
-        let due = plans.filter { Date().timeIntervalSince(lastIssueChecks[$0.id] ?? .distantPast) >= 60 }
+        let due = plans.filter { $0.isGitHub && Date().timeIntervalSince(lastIssueChecks[$0.id] ?? .distantPast) >= 60 }
         guard !due.isEmpty else { return }
         issueChecksInFlight = true
         issueCheckTask = Task { @MainActor in
@@ -246,11 +323,19 @@ struct TrackerTrapperMenuBar: App {
                             try await store.reconcileGitHubChecklist(planID: plan.id, title: title, todos: GitHubChecklist.parse(body))
                         }
                     }
+                    let previousCelebrations = celebrations
+                    if dismissedIssueRuns[plan.id] == nil {
+                        celebrations.observeGitHubIssue(plan, isClosed: closed)
+                    }
+                    if celebrations != previousCelebrations { saveCelebrations() }
+                    if let id = celebratingID, !celebrations.pending.contains(where: { $0.id == id }) { cancelCelebration() }
+                    if let id = celebratingTodoID, !celebrations.pendingTodos.contains(where: { $0.id == id }) { cancelCelebration() }
                     if closed { closedIssueIDs.insert(plan.id) }
                     else { closedIssueIDs.remove(plan.id) }
                     UserDefaults.standard.set(Array(closedIssueIDs), forKey: "closedGitHubIssueIDs")
                     snapshot = visibleSnapshot(snapshot)
                     attentionItems = attentionKeys(for: snapshot).filter { !dismissedAttentionKeys.contains($0) }
+                    startCelebrationIfNeeded()
                     refresh()
                 } catch { failed = true }
             }
@@ -288,7 +373,7 @@ struct TrackerTrapperMenuBar: App {
             catch { self.error = "Unable to stop watching: \(error.localizedDescription)" }
         }
     }
-    private func visibleSnapshot(_ source: StoreSnapshot, includingCelebrated: Bool = false) -> StoreSnapshot {
+    private func visibleSnapshot(_ source: StoreSnapshot, includingCelebrated: Bool = false, includingClosed: Bool = false) -> StoreSnapshot {
         // Keep dismissed issues cleared across refreshes and app restarts.
         // A newly started run explicitly resumes tracking the issue.
         let resumedIDs = dismissedIssueRuns.compactMap { planID, knownRuns in
@@ -301,22 +386,26 @@ struct TrackerTrapperMenuBar: App {
             visible.plans.removeAll { celebrations.dismissedPlanIDs.contains($0.id) }
             visible.runs.removeAll { celebrations.dismissedPlanIDs.contains($0.planID) }
         }
-        visible.plans.removeAll { dismissedIssueRuns[$0.id] != nil || closedIssueIDs.contains($0.id) }
-        visible.runs.removeAll { dismissedIssueRuns[$0.planID] != nil || closedIssueIDs.contains($0.planID) }
+        visible.plans.removeAll { dismissedIssueRuns[$0.id] != nil || (!includingClosed && closedIssueIDs.contains($0.id)) }
+        visible.runs.removeAll { dismissedIssueRuns[$0.planID] != nil || (!includingClosed && closedIssueIDs.contains($0.planID)) }
         return visible
     }
     func panelDidOpen() {
         panelIsOpen = true
+        cancelCelebration()
         startCelebrationIfNeeded()
     }
     func panelDidClose() {
         panelIsOpen = false
         cancelCelebration()
+        startCelebrationIfNeeded()
     }
     private func cancelCelebration() {
         celebrationTask?.cancel()
         celebrationTask = nil
         celebratingID = nil
+        celebratingTodoID = nil
+        celebrationDismissal?()
     }
     private func saveCelebrations() {
         guard let url = celebrationStateURL else { return }
@@ -326,53 +415,88 @@ struct TrackerTrapperMenuBar: App {
         } catch { celebrationError = "Unable to save completion celebrations: \(error.localizedDescription)" }
     }
     private func startCelebrationIfNeeded() {
-        guard panelIsOpen, celebrationTask == nil,
-              let plan = celebrations.pending.first(where: { pending in snapshot.plans.contains { $0.id == pending.id } }) else { return }
-        celebratingID = plan.id
-        celebrationTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .seconds(3)) } catch { return }
-            guard let self, !Task.isCancelled, self.panelIsOpen,
-                  self.celebratingID == plan.id else { return }
-            withAnimation(.easeInOut(duration: 0.5)) {
-                self.celebrations.acknowledge(plan.id)
-                self.snapshot = self.visibleSnapshot(self.snapshot)
-                self.attentionItems = self.attentionKeys(for: self.snapshot).filter { !self.dismissedAttentionKeys.contains($0) }
-                self.celebratingID = nil
+        if !celebrationsEnabled() {
+            cancelCelebration()
+            let changed = celebrations.acknowledgeWithoutAnimation()
+            if changed { snapshot = visibleSnapshot(snapshot); saveCelebrations() }
+            return
+        }
+        guard celebrationTask == nil else { return }
+        if let todo = celebrations.pendingTodos.first {
+            guard let todoCelebrationPresenter else {
+                celebrations.acknowledgeTodo(todo.id)
+                saveCelebrations()
+                startCelebrationIfNeeded()
+                return
             }
-            self.saveCelebrations()
+            guard todoCelebrationPresenter(todo) else { return }
+            celebratingTodoID = todo.id
+            celebrationTask = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: .milliseconds(2600)) } catch { return }
+                guard let self, !Task.isCancelled,
+                      self.celebratingTodoID == todo.id else { return }
+                self.acknowledgeTodoCelebration(todo.id)
+                do { try await Task.sleep(for: .seconds(0.55)) } catch { return }
+                self.celebrationTask = nil
+                self.startCelebrationIfNeeded()
+            }
+            return
+        }
+        guard let plan = celebrations.pending.first else { return }
+        if !panelIsOpen {
+            // Do not consume the persisted queue until a window was actually shown.
+            guard celebrationPresenter?(plan) == true else { return }
+        }
+        celebratingID = plan.id
+        let duration: Duration = .milliseconds(5000 + plan.todos.count * 550)
+        celebrationTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: duration) } catch { return }
+            guard let self, !Task.isCancelled,
+                  self.celebratingID == plan.id else { return }
+            self.acknowledgeCelebration(plan.id)
             do { try await Task.sleep(for: .seconds(0.55)) } catch { return }
             self.celebrationTask = nil
             self.startCelebrationIfNeeded()
         }
     }
+    func dismissCelebration() {
+        if let id = celebratingTodoID {
+            cancelCelebration()
+            acknowledgeTodoCelebration(id)
+            startCelebrationIfNeeded()
+            return
+        }
+        guard let id = celebratingID else { return }
+        cancelCelebration()
+        acknowledgeCelebration(id)
+        startCelebrationIfNeeded()
+    }
+    private func acknowledgeTodoCelebration(_ id: String) {
+        celebrations.acknowledgeTodo(id)
+        celebratingTodoID = nil
+        celebrationDismissal?()
+        saveCelebrations()
+    }
+    private func acknowledgeCelebration(_ id: String) {
+        withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .easeInOut(duration: 0.5)) {
+            celebrations.acknowledge(id)
+            snapshot = visibleSnapshot(snapshot)
+            attentionItems = attentionKeys(for: snapshot).filter { !dismissedAttentionKeys.contains($0) }
+            celebratingID = nil
+        }
+        celebrationDismissal?()
+        saveCelebrations()
+    }
     func dismissAttention(_ item: String) { dismissedAttentionKeys.insert(item); attentionItems.removeAll { $0 == item } }
     private func attentionKeys(for snapshot: StoreSnapshot) -> [String] {
-        let now = Date()
-        var result: [String] = []
-        for run in snapshot.runs {
-            switch run.status {
-            case .waitingForUser: result.append("\(run.id):waiting_for_user")
-            case .interrupted: result.append("\(run.id):interrupted")
-            case .failed: result.append("\(run.id):failed")
-            case .active where now.timeIntervalSince(run.lastActivityAt) > 15 * 60: result.append("\(run.id):stale")
-            default: break
-            }
-        }
-        for plan in snapshot.plans where !plan.todos.isEmpty && plan.todos.allSatisfy({ $0.status == .completed || $0.status == .skipped }) { result.append("\(plan.id):complete") }
-        return result
+        AttentionNotice.current(snapshot).map(\.id)
     }
-    private func notify(for keys: Set<String>) {
-        let newKeys = keys.subtracting(dismissedAttentionKeys)
-        guard !newKeys.isEmpty else { return }
-        deliverNotification(title: "Tracker Trapper", subtitle: "", body: "Agent progress needs your attention.")
-    }
-    private func deliverNotification(title: String, subtitle: String, body: String) {
+    private func deliverNotification(title: String, subtitle: String, body: String, kind: NoticeKind) {
         if let notificationHandler { notificationHandler(title, subtitle, body); return }
-        let content = UNMutableNotificationContent(); content.title = title; content.subtitle = subtitle; content.body = body; content.sound = .default
-        let request = UNNotificationRequest(identifier: "tracker-trapper-\(UUID().uuidString)", content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        Task { await NotificationService.shared.send(title: title, subtitle: subtitle, body: body, kind: kind) }
     }
 }
+
 
 private struct PanelContentHeight: PreferenceKey {
     static var defaultValue: CGFloat { 0 }
@@ -410,10 +534,13 @@ private struct ContentSizedScrollView<Content: View>: View {
 
 struct MenuContent: View {
     @ObservedObject var model: MenuModel
+    var onSettings: () -> Void = {}
     var onHeightChange: (CGFloat) -> Void = { _ in }
+    @ObservedObject private var notifications = NotificationService.shared
+    @AppStorage("setup.dismissed") private var setupDismissed = false
     @State private var showsNotifications = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private var errors: [String] { Array(Set([model.error, model.watcherError, model.githubError, model.celebrationError].compactMap { $0 })).sorted() }
+    private var errors: [String] { Array(Set([model.error, model.watcherError, model.githubError, model.celebrationError, notifications.lastError].compactMap { $0 })).sorted() }
     private var attentionGroups: [(key: String, value: [String])] {
         Dictionary(grouping: model.attentionItems, by: attentionDescription).sorted { $0.key < $1.key }
     }
@@ -421,60 +548,110 @@ struct MenuContent: View {
     private var displayPlans: [Plan] {
         let queued = Set(model.celebrations.pending.map(\.id))
         let order = [model.celebratingID].compactMap { $0 } + model.celebrations.pending.map(\.id).filter { $0 != model.celebratingID }
-        return order.compactMap { id in model.snapshot.plans.first { $0.id == id } }
+        return order.compactMap { id in model.celebrations.pending.first { $0.id == id } }
             + model.snapshot.plans.filter { !queued.contains($0.id) }
     }
     var body: some View {
         ContentSizedScrollView(maximumHeight: model.maximumPanelHeight, onHeightChange: onHeightChange,
-                               scrollResetToken: "\(model.revealID)-\(model.celebratingID ?? "")") {
+                               scrollResetToken: "\(model.revealID)-\(model.celebratingID ?? "")-\(model.celebratingTodoID ?? "")") {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Tracker Trapper").font(.headline)
+                Text("Tracker Trapper").font(.system(size: 17, weight: .bold)).tracking(-0.5)
                 Spacer()
+                Button(action: onSettings) {
+                    Image(systemName: "gearshape")
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.borderless)
+                .help("Open Tracker Trapper Settings")
+                .accessibilityLabel("Open Tracker Trapper Settings")
                 Button { showsNotifications.toggle() } label: {
                     HStack(spacing: 4) {
                         Image(systemName: notificationCount == 0 ? "bell" : "bell.badge.fill")
                         if notificationCount > 0 { Text("\(notificationCount)").font(.caption.monospacedDigit()) }
-                    }.foregroundStyle(notificationCount == 0 ? Color.secondary : .orange)
+                    }.foregroundStyle(.white)
                 }
                 .help(notificationCount == 0 ? "No notifications" : "\(notificationCount) notifications — click to view")
                 .accessibilityLabel("Notifications, \(notificationCount)")
                 .accessibilityValue(showsNotifications ? "Expanded" : "Collapsed")
                 Button { model.refreshManually() } label: {
-                    HStack(spacing: 5) {
-                        if model.isManualRefreshing {
-                            ProgressView().controlSize(.mini)
-                            Text("Refreshing…")
-                        } else if let feedback = model.refreshFeedback {
-                            Image(systemName: model.refreshHadError ? "exclamationmark.circle" : "checkmark")
-                            Text(feedback)
-                        } else {
-                            Text("Refresh")
-                        }
+                    if model.isManualRefreshing {
+                        ProgressView().controlSize(.mini).tint(.white)
+                    } else if model.refreshFeedback != nil {
+                        Image(systemName: model.refreshHadError ? "exclamationmark.circle" : "checkmark")
+                            .foregroundStyle(.white)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundStyle(.white)
                     }
                 }
                 .keyboardShortcut("r")
                 .disabled(model.isManualRefreshing)
                 .help(model.lastManualRefreshAt.map { "Last refresh: \($0.formatted(date: .omitted, time: .standard)). Reload progress, read watched sessions, and check GitHub now." } ?? "Reload progress, read watched sessions, and check GitHub now")
             }
+            if !setupDismissed && displayPlans.isEmpty {
+                HStack(spacing: 10) {
+                    Button(action: onSettings) {
+                        Label("Set up Tracker Trapper…", systemImage: "exclamationmark.circle.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    Spacer()
+                    Button { setupDismissed = true } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .help("Dismiss setup reminder")
+                    .accessibilityLabel("Dismiss setup reminder")
+                }
+                .foregroundStyle(.black)
+                .tint(.black)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(Color(red: 0.94, green: 1.0, blue: 0.35), in: Capsule())
+            }
+            if let notice = AttentionNotice.current(model.snapshot).first {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.circle.fill").font(.title3).foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Needs your attention").font(.system(size: 13, weight: .semibold))
+                        Text(notice.body).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(3)
+                    }
+                    Spacer(minLength: 0)
+                }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.orange.opacity(0.35)))
+            }
             if showsNotifications { notificationDetails }
-            VStack(alignment: .leading, spacing: 12) {
-                if model.snapshot.plans.isEmpty { Text("No registered plans yet.").foregroundStyle(.secondary); Text("Use tracker-trapper register-plan to connect an issue.").font(.caption).foregroundStyle(.secondary) }
+            if !displayPlans.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
                 ForEach(displayPlans) { plan in
                     Group {
-                        if model.celebrations.pending.contains(where: { $0.id == plan.id }) {
-                            CompletionCelebrationCard(plan: plan, playing: model.celebratingID == plan.id)
+                        if model.celebrations.pending.contains(where: { $0.id == plan.id })
+                            && !model.celebrations.hasPendingTodo(for: plan.id) {
+                            CompletionCelebrationCard(plan: plan, playing: model.celebratingID == plan.id,
+                                                      isClosedIssue: model.celebrations.isClosedIssue(plan.id))
                         } else {
                             PlanCard(plan: plan, runs: model.snapshot.runs.filter { $0.planID == plan.id }, watches: model.watches, onLink: model.linkSession, onUnlink: model.unlinkSession)
                         }
                     }
                     .transition(reduceMotion ? .opacity : .asymmetric(insertion: .opacity, removal: .move(edge: .trailing).combined(with: .opacity).combined(with: .scale(scale: 0.92))))
                 }
-            }.id(model.revealID)
-            Divider(); Text(model.snapshot.outbox.isEmpty ? "Synced or no pending updates." : "\(model.snapshot.outbox.count) update(s) saved locally; GitHub sync pending.").font(.caption).foregroundStyle(.secondary)
-        }.padding(16).frame(width: 420)
+                }.id(model.revealID)
+                Divider(); Text(footerText).font(.caption).foregroundStyle(.secondary)
+            }
+        }.padding(18).frame(width: 420)
         }.frame(width: 420)
+        .trackerGlass(radius: 26, shell: true)
+        .tint(.white)
+        .buttonStyle(.borderless)
         .onChange(of: model.revealID) { _ in showsNotifications = false }
+    }
+    private var footerText: String {
+        if !model.snapshot.plans.contains(where: \.isGitHub) {
+            return "Local plans stay on this Mac."
+        }
+        return model.snapshot.outbox.isEmpty
+            ? "No GitHub updates pending."
+            : "\(model.snapshot.outbox.count) update(s) saved locally; GitHub sync pending."
     }
     private var notificationDetails: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -511,13 +688,11 @@ struct MenuContent: View {
                     }.font(.caption).frame(maxWidth: .infinity, alignment: .leading)
                 }.frame(maxHeight: 200)
             }
-        }.padding(10).background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+        }.padding(14).trackerGlass(radius: 16)
     }
     private func attentionDescription(_ key: String) -> String {
-        let ownerID = key.split(separator: ":").dropLast().joined(separator: ":")
-        let planID = model.snapshot.runs.first { $0.id == ownerID }?.planID ?? ownerID
-        if let plan = model.snapshot.plans.first(where: { $0.id == planID }) {
-            return "\(plan.repository) #\(plan.issueNumber): \(attentionLabel(key))"
+        if let notice = AttentionNotice.current(model.snapshot).first(where: { $0.id == key }) {
+            return "\(notice.subtitle): \(notice.body)"
         }
         return attentionLabel(key)
     }
@@ -550,12 +725,12 @@ struct PlanCard: View {
     }
     var linkedSessions: [SessionWatch] { watches.filter { watch in runs.contains { $0.id == watch.runID } } }
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Button { showsRemainingOnly.toggle() } label: {
                     HStack {
                         Image(systemName: showsRemainingOnly ? "chevron.right" : "chevron.down")
-                        Text("\(plan.repository) #\(plan.issueNumber)").font(.subheadline.bold())
+                        Text(plan.displaySubtitle).font(.system(size: 12)).foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle)
                     }.contentShape(Rectangle())
                 }
@@ -563,8 +738,8 @@ struct PlanCard: View {
                 .help(showsRemainingOnly ? "Show all tasks" : "Show only remaining tasks")
                 .accessibilityValue(showsRemainingOnly ? "Remaining tasks only" : "All tasks")
                 Spacer(minLength: 2)
-                Text("\(completed)/\(plan.todos.count)").monospacedDigit().foregroundStyle(.secondary)
-                if let url = URL(string: plan.issueURL) {
+
+                if plan.isGitHub, let url = URL(string: plan.issueURL) {
                     Link(destination: url) {
                         GitHubMark().fill(.primary).frame(width: 15, height: 15)
                             .frame(width: 26, height: 26).contentShape(Rectangle())
@@ -592,16 +767,21 @@ struct PlanCard: View {
                 Group {
                     Button { onUnlink(plan.id) } label: {
                         Image(systemName: "xmark").font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white).frame(width: 26, height: 26).contentShape(Rectangle())
+                            .foregroundStyle(.secondary).frame(width: 26, height: 26).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .background(Color.red.opacity(0.22), in: RoundedRectangle(cornerRadius: 5))
-                    .help("Stop watching and remove this issue from Tracker Trapper")
-                    .accessibilityLabel("Stop watching \(plan.repository) #\(plan.issueNumber) and remove its task list")
+                    .foregroundStyle(.secondary)
+                    .help("Stop watching and remove this plan from Tracker Trapper")
+                    .accessibilityLabel("Stop watching \(plan.displaySubtitle) and remove its task list")
                 }
             }
-            Text(plan.title).lineLimit(2)
-            ProgressView(value: Double(completed), total: Double(max(plan.todos.count, 1)))
+            Text(plan.title).font(.system(size: 17, weight: .bold)).tracking(-0.35).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+            if plan.source == .local, let workspacePath = plan.workspacePath, !workspacePath.isEmpty {
+                Text(URL(fileURLWithPath: workspacePath).lastPathComponent).font(.caption).foregroundStyle(.secondary)
+                    .help(workspacePath)
+            }
+            TrackerProgress(completed: completed, total: plan.todos.count).padding(.top, 6)
+            Divider().overlay(Color.blue.opacity(0.05))
             ForEach(runs.filter { run in run.status == .active && !watches.contains { $0.runID == run.id } }) { run in
                 HStack {
                     Spacer()
@@ -640,43 +820,51 @@ struct PlanCard: View {
                     if complete { expandedStages.remove(stage) }
                 }
             }
-        }.padding(10).background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+            if let run = runs.max(by: { $0.lastActivityAt < $1.lastActivityAt }) {
+                Divider().padding(.top, 4)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 7) {
+                        Circle().fill(run.status == .active ? Color.green : Color.orange).frame(width: 6, height: 6)
+                        Text("\(run.agent) · \(run.status.rawValue.replacingOccurrences(of: "_", with: " ").capitalized)")
+                            .font(.system(size: 12))
+                    }
+                    Text("Activity updated \(run.lastActivityAt.formatted(.relative(presentation: .named)))")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+        }.padding(16).trackerGlass(radius: 18)
         .onChange(of: showsRemainingOnly) { remainingOnly in
             expandedStages = remainingOnly ? [] : Set(stages)
         }
     }
     private func todoRow(_ todo: Todo) -> some View {
         let isNext = plan.nextTodo?.id == todo.id
-        return HStack(alignment: .top) {
+        return HStack(alignment: .top, spacing: 10) {
             Image(systemName: isNext ? "circle.fill" : icon(for: todo.status))
                 .foregroundStyle(isNext ? .blue : color(for: todo.status))
+                .font(.system(size: 15)).frame(width: 18, height: 20)
                 .help(isNext ? "Next task" : todo.status.rawValue)
-            Text(todo.description).fixedSize(horizontal: false, vertical: true)
+            Text(todo.description).font(.system(size: 13)).strikethrough(todo.status == .completed)
+                .foregroundStyle(todo.status == .completed ? .secondary : .primary)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(.vertical, 3)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(isNext ? "Next task, " : "")\(todo.status.rawValue): \(todo.description)")
     }
-    func icon(for status: TodoStatus) -> String { switch status { case .completed: "checkmark.circle.fill"; case .inProgress: "circle.inset.filled"; case .blocked: "exclamationmark.triangle.fill"; case .skipped: "minus.circle"; case .pending: "circle" } }
+    func icon(for status: TodoStatus) -> String { switch status { case .completed: "checkmark.circle.fill"; case .inProgress: "circle.inset.filled"; case .blocked: "exclamationmark.triangle.fill"; case .skipped: "minus.circle"; case .pending: "square" } }
     func color(for status: TodoStatus) -> Color { switch status { case .completed: .green; case .inProgress: .blue; case .blocked: .orange; case .skipped: .secondary; case .pending: .secondary } }
 }
 
-private struct CompletionCelebrationCard: View {
+struct CompletionCelebrationCard: View {
     let plan: Plan
     let playing: Bool
+    var isClosedIssue = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var burst = false
 
     var body: some View {
         ZStack {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(plan.todos.prefix(5)) { todo in
-                    Label(todo.description, systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.secondary).lineLimit(2)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(16).blur(radius: 5).opacity(0.45).accessibilityHidden(true)
-
             if playing && !reduceMotion {
                 GeometryReader { geometry in
                     ForEach(0..<30, id: \.self) { index in
@@ -697,17 +885,27 @@ private struct CompletionCelebrationCard: View {
                 Image(systemName: "party.popper.fill")
                     .font(.system(size: 40)).foregroundStyle(.yellow)
                     .scaleEffect(playing && !reduceMotion ? 1.12 : 1)
-                Text("Issue complete!").font(.title2.bold())
-                Text("\(plan.repository) #\(plan.issueNumber)").font(.subheadline.bold())
-                Text(plan.title).font(.caption).multilineTextAlignment(.center).lineLimit(3)
+                Text(isClosedIssue ? "Issue closed!" : (plan.isGitHub ? "Issue complete!" : "List complete!")).font(.title2.bold())
+                Text(plan.displaySubtitle).font(.subheadline.bold())
+                Text(plan.title).font(.system(size: 13)).multilineTextAlignment(.center).lineLimit(3)
+                if !isClosedIssue {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(plan.todos.filter { $0.status == .completed }.prefix(3)) { todo in
+                            HStack(spacing: 9) {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                                Text(todo.description).strikethrough().foregroundStyle(.secondary).lineLimit(2)
+                            }.font(.system(size: 12))
+                        }
+                    }.padding(.top, 15)
+                }
             }
             .padding(18).frame(maxWidth: .infinity)
         }
-        .frame(height: 230)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .frame(minHeight: 270)
+        .trackerGlass(radius: 18)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Issue complete: \(plan.repository) #\(plan.issueNumber), \(plan.title)")
+        .accessibilityLabel("\(isClosedIssue ? "Issue closed" : "Plan complete"): \(plan.displaySubtitle), \(plan.title)")
         .task(id: playing) {
             burst = false
             guard playing, !reduceMotion else { return }

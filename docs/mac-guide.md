@@ -74,13 +74,45 @@ check, with a spinner and result feedback. Local observation also runs once per 
 The panel displays issue cards, task statuses, and progress counts. See
 [Panel and session features](#panel-and-session-features) for the compact controls.
 
+Click the gear in the panel header to open Tracker Trapper Settings. The
+Notifications tab shows the permission state macOS reports, lets you request
+permission again when it has not been decided, opens macOS Notification
+Settings, and sends a test notification. A successful test means the request
+was submitted to macOS; Focus and macOS banner/list settings can still affect
+what appears on screen. The same tab lets you separately enable completion
+notices, needs-attention notices, and notification sounds.
+
+The Setup tab is a short checklist for first use: keep the menu-bar app
+running, enable and test notifications, connect an agent through the local MCP
+server, and import an issue with stable task IDs. Connecting an MCP server does
+not make an agent report automatically; give the agent the reporting instruction
+in the integration section and verify that activity arrives in the panel.
+
 Tracker Trapper has no normal Dock window. To quit, use Activity Monitor to
 quit the process named `TrackerTrapper`. It does not install a login service.
 For automatic launch, add your chosen app copy to **Open at Login** in macOS
 System Settings (search Settings for “Login Items”); menu wording varies by
 macOS version.
 
-## 3. Track an existing GitHub issue
+## 3. Track a local task or GitHub issue
+
+For work that does not belong to a GitHub issue, Tracker Trapper supports local
+plans. They keep stable todos, evidence, run history, and optional session
+watching in the same local store. They do not require a Git repository or
+GitHub account and never enter the GitHub synchronization queue.
+
+Tracking starts only when requested for the current session. Use
+`$tracker on|off|start|status` in Codex or `/tracker on|off|start|status` in
+Claude Code. `on` and `start` create or resume a local checklist for the current
+task. `off` pauses the current session's run without deleting its plan. These
+are installed skills, so their exact availability depends on the client loading
+that skill. The CLI and MCP operations work independently of command support.
+
+When the `issue-to-work` skill starts or resumes a GitHub issue, it binds that
+issue plan and run to the current session automatically. It does not create a
+separate local checklist or enable questions for later sessions.
+
+To track an existing GitHub issue:
 
 Authenticate GitHub CLI, then set these shell variables from the repository root.
 Replace the example repository and issue number with your own:
@@ -207,6 +239,19 @@ The core tools are `register_plan`, `get_plan`, `start_run`, `start_task`,
 `complete_task`, `update_task`, `report_activity`, and `finish_run`.
 Installing MCP exposes tools; it does not make agents use them automatically.
 See [Agent integrations](../Integrations/README.md) for optional hook adapters.
+Codex loads the tracker skill from `~/.agents/skills/tracker`; Claude Code loads
+it from `~/.claude/skills/tracker`.
+
+Install the explicit tracker skill after the release build:
+
+```sh
+mkdir -p ~/.agents/skills ~/.claude/skills
+ditto Integrations/skills/tracker ~/.agents/skills/tracker
+ditto Integrations/skills/tracker ~/.claude/skills/tracker
+```
+
+Remove either copied skill folder to uninstall that client's command. Saved
+plans and evidence remain in Tracker Trapper's local store.
 
 ## 6. Synchronize progress to GitHub
 
@@ -263,7 +308,7 @@ not deleted by uninstalling.
 
 | Symptom | What to check |
 | --- | --- |
-| No app window or Dock icon | Look for the checklist icon in the menu bar; press ⌘⇧T. Verify the app is running in Activity Monitor. |
+| No app window or Dock icon | Look for the checklist icon in the menu bar; press the shortcut configured in Settings → General (⌘⇧T by default). Verify the app is running in Activity Monitor. |
 | Shortcut does nothing | Click the menu-bar icon; another app may own the shortcut. |
 | Swift build fails immediately | Confirm Swift 6+ and the selected macOS SDK/toolchain. |
 | An imported issue has no tasks | Check the exact stable-ID checklist format above and inspect `get-plan`. |
@@ -294,9 +339,18 @@ and reconnect its MCP clients after updating.
   inferred from checklist order.
 
 - Closed GitHub issues are removed from tracking automatically; history is kept.
-- Newly completed tasks request a macOS notification. When an entire issue's
-  checklist finishes, opening the panel plays a celebration over its blurred
-  task card, then dismisses it. Existing completed imports do not trigger a party.
+- Newly completed tasks request a macOS notification. Finishing a local list or
+  issue checklist, or observing an open GitHub issue close, automatically shows a
+  44-point celebration icon beneath the menu bar for about 1.4 seconds. It does
+  not take keyboard focus; clicking the icon dismisses it early. If the main panel is
+  already open, the celebration plays there instead. Simultaneous completions
+  queue in order. Existing completed/closed imports do not trigger a party, and
+  an already-celebrated checklist does not replay when its issue closes.
+- **Settings → General → Show completion celebrations** turns this on or off.
+  With Reduce Motion enabled, the celebration stays still. Turning
+  celebrations off clears completed cards quietly. Closing an issue does not
+  mark its unfinished todos complete. GitHub closure detection uses the existing
+  polling interval (up to about a minute); **Refresh** checks immediately.
 - GitHub refresh imports missing stable checklist IDs and checked pending tasks,
   preserving historical evidence and local completed work.
 

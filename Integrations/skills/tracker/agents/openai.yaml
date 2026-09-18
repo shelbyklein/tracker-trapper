@@ -1,0 +1,6 @@
+interface:
+  display_name: "Tracker Trapper"
+  short_description: "Control local task tracking"
+
+policy:
+  allow_implicit_invocation: false

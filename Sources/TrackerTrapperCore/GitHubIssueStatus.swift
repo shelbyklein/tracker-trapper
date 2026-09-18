@@ -14,7 +14,8 @@ public enum GitHubIssueStatus {
     }
 
     public static func details(_ plan: Plan, executable: URL? = nil) async throws -> GitHubIssueDetails {
-        try await Task.detached(priority: .utility) { try query(plan, executable: executable) }.value
+        guard plan.source == .github else { throw StoreError.conflict("local plans have no GitHub issue") }
+        return try await Task.detached(priority: .utility) { try query(plan, executable: executable) }.value
     }
 
     private static func query(_ plan: Plan, executable: URL?) throws -> GitHubIssueDetails {

@@ -19,6 +19,10 @@ done
 [ -n "$REPO" ] && [ -n "$ISSUE" ] && [ -n "$PLAN" ] || { echo "usage: sync-github-issue.sh --repo owner/name --issue number --plan-id id [--dry-run]" >&2; exit 2; }
 
 STORE="${TRACKER_TRAPPER_STORE:-$HOME/Library/Application Support/TrackerTrapper/store.json}"
+SNAPSHOT="$(TRACKER_TRAPPER_STORE="$STORE" "$TT_TRACKER_TRAPPER_BIN" snapshot)"
+PLAN_SOURCE="$(printf '%s' "$SNAPSHOT" | jq -r --arg plan "$PLAN" '.plans[] | select(.id == $plan) | .source // "github"')"
+[ -n "$PLAN_SOURCE" ] || { echo "Tracker Trapper sync refused: plan $PLAN was not found." >&2; exit 2; }
+[ "$PLAN_SOURCE" = "github" ] || { echo "Tracker Trapper sync refused: $PLAN is a local plan." >&2; exit 2; }
 BODY_FILE="$(mktemp -t tracker-trapper-body.XXXXXX)"
 NEW_FILE="$(mktemp -t tracker-trapper-new.XXXXXX)"
 trap 'rm -f "$BODY_FILE" "$NEW_FILE"' EXIT
@@ -26,7 +30,6 @@ gh issue view "$ISSUE" --repo "$REPO" --json body --jq .body > "$BODY_FILE"
 
 BLOCK="<!-- tracker-trapper:progress:start -->"
 END="<!-- tracker-trapper:progress:end -->"
-SNAPSHOT="$(TRACKER_TRAPPER_STORE="$STORE" "$TT_TRACKER_TRAPPER_BIN" snapshot)"
 EXPECTED_HASH="$(printf '%s' "$SNAPSHOT" | jq -r --arg plan "$PLAN" '.plans[] | select(.id == $plan) | .lastSyncedProgressHash // empty')"
 if grep -qF "$BLOCK" "$BODY_FILE"; then
   CURRENT_HASH="$(TT_BLOCK="$BLOCK" TT_END="$END" awk '$0 == ENVIRON["TT_BLOCK"] { inside=1 } inside { print } $0 == ENVIRON["TT_END"] { inside=0 }' "$BODY_FILE" | shasum -a 256 | awk '{print $1}')"

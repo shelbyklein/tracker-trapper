@@ -15,6 +15,7 @@ let package = Package(
         .executableTarget(name: "TrackerTrapperCLI", dependencies: ["TrackerTrapperCore"]),
         .executableTarget(name: "TrackerTrapperMCP", dependencies: ["TrackerTrapperCore"]),
         .executableTarget(name: "TrackerTrapperMenuBar", dependencies: ["TrackerTrapperCore"]),
-        .testTarget(name: "TrackerTrapperCoreTests", dependencies: ["TrackerTrapperCore"])
+        .testTarget(name: "TrackerTrapperCoreTests", dependencies: ["TrackerTrapperCore"]),
+        .testTarget(name: "TrackerTrapperAppTests", dependencies: ["TrackerTrapperMenuBar"])
     ]
 )

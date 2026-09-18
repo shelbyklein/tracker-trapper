@@ -15,7 +15,7 @@ public struct CompletionNotice: Equatable, Sendable {
             guard !completed.isEmpty else { return nil }
             return CompletionNotice(
                 title: completed.count == 1 ? "Todo completed" : "\(completed.count) todos completed",
-                subtitle: "\(plan.repository) #\(plan.issueNumber)",
+                subtitle: plan.displaySubtitle,
                 body: completed.map { $0.description }.joined(separator: "\n")
             )
         }
