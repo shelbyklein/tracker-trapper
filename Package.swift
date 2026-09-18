@@ -7,11 +7,13 @@ let package = Package(
     products: [
         .library(name: "TrackerTrapperCore", targets: ["TrackerTrapperCore"]),
         .executable(name: "tracker-trapper", targets: ["TrackerTrapperCLI"]),
+        .executable(name: "tracker-trapper-mcp", targets: ["TrackerTrapperMCP"]),
         .executable(name: "TrackerTrapperMenuBar", targets: ["TrackerTrapperMenuBar"])
     ],
     targets: [
         .target(name: "TrackerTrapperCore"),
         .executableTarget(name: "TrackerTrapperCLI", dependencies: ["TrackerTrapperCore"]),
+        .executableTarget(name: "TrackerTrapperMCP", dependencies: ["TrackerTrapperCore"]),
         .executableTarget(name: "TrackerTrapperMenuBar", dependencies: ["TrackerTrapperCore"]),
         .testTarget(name: "TrackerTrapperCoreTests", dependencies: ["TrackerTrapperCore"])
     ]
