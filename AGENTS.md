@@ -9,3 +9,5 @@ Read `instructions/2026-09-17-menu-bar-progress-tracker.md` and its linked GitHu
 - Keep incomplete or blocked work visible. Do not close the tracking issue merely because an agent session ended.
 - Use actual installed-client evidence before claiming Codex or Claude Code integration works.
 - Never commit credentials or private transcripts. Do not expose the local collector publicly.
+
+- Report the next immediate unfinished todo explicitly with `nextTodoID` on MCP task/activity updates, or `--next-todo-id` on CLI reports. Use `set_next_task` / `set-next-task` to change it independently. Pass an empty string to clear it; omission preserves the selection. Do not guess a next task from checklist order when the work sequence is unknown.

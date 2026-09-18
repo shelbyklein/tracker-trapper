@@ -56,15 +56,23 @@ Quit the earlier copy before opening another. Keep the source checkout in place:
 agent MCP connections use executables inside its `.build/release` directory,
 not the app bundle.
 
+### Find it with Spotlight
+
+For a shortcut that follows rebuilds, locate `dist/TrackerTrapper.app` in Finder,
+choose **File → Make Alias**, rename the alias **Tracker Trapper**, and move it
+to your home folder's `Applications` folder. Keep the original app in place.
+This avoids maintaining a separate copied app. Press **Command–Space** and search
+**Tracker Trapper**. Spotlight may take a moment to index the shortcut.
+Once launched, use the menu-bar icon or **Command–Shift–T** to reveal the panel.
+
 ## 2. Open the panel
 
 Click the checklist icon in the macOS menu bar or press **Command–Shift–T**.
-Click the icon or use the shortcut again to close it. **Refresh** reloads the
-local store; the app also refreshes once per second.
+Click the icon or use the shortcut again to close it. **Refresh** reads watched session updates and forces a GitHub state/checklist
+check, with a spinner and result feedback. Local observation also runs once per second.
 
-The published panel displays issue cards, task statuses, progress counts, and
-activity details. The newest compact UI is described under
-[Local development preview](#local-development-preview).
+The panel displays issue cards, task statuses, and progress counts. See
+[Panel and session features](#panel-and-session-features) for the compact controls.
 
 Tracker Trapper has no normal Dock window. To quit, use Activity Monitor to
 quit the process named `TrackerTrapper`. It does not install a login service.
@@ -242,7 +250,7 @@ store-locking fix must not keep writing alongside current processes.
 
 Back up the entire `~/Library/Application Support/TrackerTrapper` directory
 while all writers are stopped. It contains `store.json`, lock files, and, in
-the development preview, `store.watchers.json`. Restore to the same location
+session watching, `store.watchers.json`. Restore to the same location
 before restarting. `TRACKER_TRAPPER_STORE` overrides the path separately for
 each process; a Finder-launched app does not inherit a Terminal-only override.
 
@@ -263,19 +271,16 @@ not deleted by uninstalling.
 | The stdio server seems to hang in Terminal | It waits for JSON-RPC input; an agent MCP client normally starts it. Use the CLI for manual commands. |
 | The app and CLI show different plans | Check `TRACKER_TRAPPER_STORE`, the logged-in macOS user, and whether an old app copy is running. |
 | A task stays stale or incomplete | The agent must report progress; running commands alone does not prove task completion. |
-| Errors or many notices | Published builds show inline notices. The preview groups them behind a bell icon. |
-| Missing `watch_session` or `nextTodoID` | These are preview features; see below. Reconnecting cannot add code that isn't in your checkout. |
+| Errors or many notices | Click the bell icon for grouped notices and dismissal controls. |
+| Missing `watch_session` or `nextTodoID` | Update your checkout, rebuild, and reconnect the MCP client. |
 | No notification banners | Check Tracker Trapper's macOS notification permission and Focus settings. Keep the app running. |
 
-## Local development preview
+<a id="local-development-preview"></a>
 
-**Availability:** the following changes have been built in the maintainer's local
-checkout but their implementation is not yet published in GitHub `main` as of
-this documentation update. The published baseline is commit `5168f8b`. A fresh
-clone cannot enable these features merely by following the commands below.
-Check `tracker-trapper --help` and the MCP tool list in the build you actually run.
+## Panel and session features
 
-Once using a build that contains these changes:
+These features are included in the current source. Rebuild an older installation
+and reconnect its MCP clients after updating.
 
 - The panel fits its content and scrolls only at the available-height limit.
 - Every reveal starts issue cards in remaining-only mode. Click an issue name
@@ -286,6 +291,13 @@ Once using a build that contains these changes:
   Starting a new run for that issue brings it back; stored history is retained.
 - An explicitly selected next task gets a filled blue dot. The selection is not
   inferred from checklist order.
+
+- Closed GitHub issues are removed from tracking automatically; history is kept.
+- Newly completed tasks request a macOS notification. When an entire issue's
+  checklist finishes, opening the panel plays a celebration over its blurred
+  task card, then dismisses it. Existing completed imports do not trigger a party.
+- GitHub refresh imports missing stable checklist IDs and checked pending tasks,
+  preserving historical evidence and local completed work.
 
 ### Select the next immediate task
 

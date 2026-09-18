@@ -33,6 +33,11 @@ public struct Plan: Codable, Identifiable, Equatable, Sendable {
     public var revision: Int
     public var updatedAt: Date
     public var lastSyncedProgressHash: String?
+    public var nextTodoID: String?
+
+    public var nextTodo: Todo? {
+        todos.first { $0.id == nextTodoID && $0.status != .completed && $0.status != .skipped }
+    }
 
     public init(id: String = UUID().uuidString, repository: String, issueNumber: Int, issueURL: String, title: String, todos: [Todo], revision: Int = 0, updatedAt: Date = .now, lastSyncedProgressHash: String? = nil) {
         self.id = id; self.repository = repository; self.issueNumber = issueNumber; self.issueURL = issueURL

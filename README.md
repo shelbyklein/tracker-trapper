@@ -35,13 +35,10 @@ The published source provides the menu-bar panel, stable issue/todo IDs,
 CLI and stdio MCP reporting, durable local progress, hook adapters, and an
 explicit GitHub synchronization script.
 
-The newer content-sized panel, remaining-only cards, notification bell,
-background session watcher, explicit next-task blue dot, and **Stop watching**
-card removal are currently local development changes. They are documented in
-the guide's [local development preview](docs/mac-guide.md#local-development-preview),
-but are **not included in the published source as of this documentation update**.
-A fresh clone will show the earlier panel. Check that section before using the
-preview-only commands.
+The content-sized panel, remaining-only cards, notification bell, background
+session watcher, explicit next-task blue dot, completion celebrations, GitHub
+checklist refresh, and **Stop watching** card removal are included in source.
+See the guide's [panel and session features](docs/mac-guide.md#panel-and-session-features).
 
 ## More information
 

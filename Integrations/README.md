@@ -2,7 +2,9 @@
 
 Start with the [Mac installation and usage guide](../docs/mac-guide.md#5-connect-codex-or-claude-code) for building the executables and connecting Codex or Claude Code.
 
-**Published-source status:** core CLI/MCP reporting and the hook adapters below are in GitHub `main`. Background session watching, explicit next-task selection, and the newer **Stop watching** UI are local development preview features whose implementation has not yet been published. See the [availability notes](../docs/mac-guide.md#local-development-preview) before using those commands.
+Core CLI/MCP reporting, hook adapters, background session watching, explicit
+next-task selection, and the **Stop watching** UI are included in source.
+Rebuild and reconnect older MCP clients to load the current tools.
 
 ## Background session watcher
 

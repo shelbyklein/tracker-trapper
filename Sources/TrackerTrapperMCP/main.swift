@@ -39,10 +39,14 @@ struct TrackerTrapperMCP {
         tool("register_plan", "Register or update a GitHub issue plan with stable todo IDs", ["repository": "string", "issueNumber": "integer", "issueURL": "string", "title": "string", "todos": "array"]),
         tool("get_plan", "Read a persistent plan and its current progress", ["planID": "string"]),
         tool("start_run", "Associate an agent session with a plan", ["planID": "string", "agent": "string", "sessionID": "string", "repositoryPath": "string"]),
-        tool("start_task", "Mark a stable todo as in progress", ["runID": "string", "todoID": "string", "message": "string", "eventID": "string"]),
-        tool("complete_task", "Mark a stable todo completed with evidence", ["runID": "string", "todoID": "string", "message": "string", "evidence": "array", "eventID": "string"]),
-        tool("update_task", "Set a todo state and attach evidence", ["runID": "string", "todoID": "string", "status": "string", "message": "string", "evidence": "array", "eventID": "string"]),
-        tool("report_activity", "Record agent activity without changing task completion", ["runID": "string", "message": "string", "eventID": "string"]),
+        tool("watch_session", "Link this run to its own local session JSONL file. The menu-bar app watches new output without requiring repeated reporting. format must be codex or claude; sourcePath must be absolute. Historical records are skipped.", ["runID": "string", "sourcePath": "string", "format": "string"]),
+        tool("unwatch_session", "Stop observing a linked session without changing its tasks or run", ["runID": "string"]),
+        tool("watch_status", "Show linked session watcher status", [:]),
+        tool("set_next_task", "Set the issue next task by stable ID; empty nextTodoID clears it", ["runID": "string", "nextTodoID": "string"]),
+        tool("start_task", "Mark a stable todo as in progress. Optional nextTodoID selects the next unfinished task; empty string clears it", ["runID": "string", "todoID": "string", "message": "string", "eventID": "string", "nextTodoID": "string"]),
+        tool("complete_task", "Mark a stable todo completed with evidence. Optional nextTodoID selects the next unfinished task; empty string clears it", ["runID": "string", "todoID": "string", "message": "string", "evidence": "array", "eventID": "string", "nextTodoID": "string"]),
+        tool("update_task", "Set a todo state and attach evidence. Optional nextTodoID selects the next unfinished task; empty string clears it", ["runID": "string", "todoID": "string", "status": "string", "message": "string", "evidence": "array", "eventID": "string", "nextTodoID": "string"]),
+        tool("report_activity", "Record agent activity without changing task completion. Optional nextTodoID selects the next unfinished task; empty string clears it", ["runID": "string", "message": "string", "eventID": "string", "nextTodoID": "string"]),
         tool("finish_run", "Record a paused, interrupted, failed, or finished agent run", ["runID": "string", "status": "string", "message": "string"])
         ]
     }
@@ -63,13 +67,24 @@ struct TrackerTrapperMCP {
             let id = try string("planID", args); guard let plan = try await store.read().plans.first(where: { $0.id == id }) else { throw StoreError.notFound(id) }; return try plan.json()
         case "start_run":
             return try await store.startRun(planID: string("planID", args), agent: string("agent", args), sessionID: string("sessionID", args), repositoryPath: string("repositoryPath", args)).json()
+        case "watch_session":
+            guard let format = SessionFormat(rawValue: try string("format", args)) else { throw MCPError.invalidParams }
+            return try await SessionWatcher(store: store).link(runID: string("runID", args), sourcePath: string("sourcePath", args), format: format).json()
+        case "unwatch_session":
+            try await SessionWatcher(store: store).unlink(runID: string("runID", args)); return ["ok": true]
+        case "watch_status":
+            return ["watches": try await SessionWatcher(store: store).reports().json()]
         case "start_task", "complete_task", "update_task":
             let status = name == "start_task" ? TodoStatus.inProgress : name == "complete_task" ? TodoStatus.completed : TodoStatus(rawValue: try string("status", args))
             guard let status else { throw MCPError.invalidParams }
-            try await store.update(runID: string("runID", args), todoID: string("todoID", args), status: status, message: args["message"] as? String, evidence: args["evidence"] as? [String] ?? [], eventID: args["eventID"] as? String ?? UUID().uuidString)
+            try await store.update(runID: string("runID", args), todoID: string("todoID", args), status: status, message: args["message"] as? String, evidence: args["evidence"] as? [String] ?? [], eventID: args["eventID"] as? String ?? UUID().uuidString, nextTodoID: args["nextTodoID"] as? String)
+            return ["ok": true]
+        case "set_next_task":
+            guard let nextID = args["nextTodoID"] as? String else { throw MCPError.invalidParams }
+            try await store.update(runID: string("runID", args), todoID: nil, status: nil, message: "Next task selection", nextTodoID: nextID)
             return ["ok": true]
         case "report_activity":
-            try await store.update(runID: string("runID", args), todoID: nil, status: nil, message: args["message"] as? String, eventID: args["eventID"] as? String ?? UUID().uuidString); return ["ok": true]
+            try await store.update(runID: string("runID", args), todoID: nil, status: nil, message: args["message"] as? String, eventID: args["eventID"] as? String ?? UUID().uuidString, nextTodoID: args["nextTodoID"] as? String); return ["ok": true]
         case "finish_run":
             guard let status = RunStatus(rawValue: try string("status", args)) else { throw MCPError.invalidParams }
             try await store.finishRun(runID: string("runID", args), status: status, message: args["message"] as? String); return ["ok": true]

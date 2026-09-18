@@ -75,10 +75,17 @@ struct TrackerTrapperCLI {
             let suppliedStatus = value(after: "--status", in: args).flatMap(TodoStatus.init(rawValue:))
             guard command != "update-task" || suppliedStatus != nil else { throw CLIError.usage("update-task requires --status") }
             let effectiveStatus = command == "start-task" ? TodoStatus.inProgress : command == "complete-task" ? TodoStatus.completed : suppliedStatus!
-            try await store.update(runID: runID, todoID: todoID, status: effectiveStatus, message: value(after: "--message", in: args), evidence: values(after: "--evidence", in: args), eventID: value(after: "--event-id", in: args) ?? UUID().uuidString); print("updated")
+            try await store.update(runID: runID, todoID: todoID, status: effectiveStatus, message: value(after: "--message", in: args), evidence: values(after: "--evidence", in: args), eventID: value(after: "--event-id", in: args) ?? UUID().uuidString, nextTodoID: value(after: "--next-todo-id", in: args)); print("updated")
+        case "set-next-task":
+            guard let runID = value(after: "--run-id", in: args),
+                  let nextID = value(after: "--next-todo-id", in: args) else {
+                throw CLIError.usage("set-next-task requires --run-id and --next-todo-id (empty string clears)")
+            }
+            try await store.update(runID: runID, todoID: nil, status: nil, message: "Next task selection", nextTodoID: nextID)
+            print("updated")
         case "activity":
             guard let runID = value(after: "--run-id", in: args) else { throw CLIError.usage("activity requires --run-id") }
-            try await store.update(runID: runID, todoID: nil, status: nil, message: value(after: "--message", in: args), evidence: values(after: "--evidence", in: args), eventID: value(after: "--event-id", in: args) ?? UUID().uuidString); print("recorded")
+            try await store.update(runID: runID, todoID: nil, status: nil, message: value(after: "--message", in: args), evidence: values(after: "--evidence", in: args), eventID: value(after: "--event-id", in: args) ?? UUID().uuidString, nextTodoID: value(after: "--next-todo-id", in: args)); print("recorded")
         case "record-sync":
             guard let planID = value(after: "--plan-id", in: args), let hash = value(after: "--hash", in: args) else { throw CLIError.usage("record-sync requires --plan-id and --hash") }
             try await store.recordSync(planID: planID, hash: hash); print("recorded")
@@ -88,6 +95,17 @@ struct TrackerTrapperCLI {
             guard let runID = value(after: "--run-id", in: args), let raw = value(after: "--status", in: args), let status = RunStatus(rawValue: raw) else { throw CLIError.usage("finish-run requires --run-id and --status") }
             try await store.finishRun(runID: runID, status: status, message: value(after: "--message", in: args)); print("finished")
         case "snapshot": try printJSON(try await store.read())
+        case "watch-session":
+            guard let runID = value(after: "--run-id", in: args), let path = value(after: "--source", in: args),
+                  let raw = value(after: "--format", in: args), let format = SessionFormat(rawValue: raw) else {
+                throw CLIError.usage("watch-session requires --run-id, --source /absolute/session.jsonl, --format codex|claude")
+            }
+            try printJSON(await SessionWatcher(store: store).link(runID: runID, sourcePath: path, format: format))
+        case "unwatch-session":
+            guard let runID = value(after: "--run-id", in: args) else { throw CLIError.usage("unwatch-session requires --run-id") }
+            try await SessionWatcher(store: store).unlink(runID: runID); print("unlinked")
+        case "watch-status": try printJSON(await SessionWatcher(store: store).reports())
+        case "watch-once": try printJSON(await SessionWatcher(store: store).poll())
         default: throw CLIError.usage("unknown command \(command)")
         }
     }
@@ -97,18 +115,7 @@ struct TrackerTrapperCLI {
         let data = try runProcess("gh", arguments: ["issue", "view", String(issueNumber), "--repo", repository, "--json", "title,body,url"])
         struct Issue: Decodable { let title: String; let body: String; let url: String }
         let issue = try JSONDecoder().decode(Issue.self, from: data)
-        let todos = issue.body.split(separator: "\n", omittingEmptySubsequences: false).compactMap { raw -> Todo? in
-            let line = String(raw); guard line.hasPrefix("- [") else { return nil }
-            guard let markerEnd = line.firstIndex(of: "]"), line.distance(from: line.startIndex, to: markerEnd) >= 3 else { return nil }
-            guard let boldStart = line.range(of: "**", range: markerEnd..<line.endIndex), let separator = line.range(of: " — ", range: boldStart.upperBound..<line.endIndex), let boldEnd = line.range(of: "**", range: separator.upperBound..<line.endIndex) else { return nil }
-            let id = String(line[boldStart.upperBound..<separator.lowerBound]).trimmingCharacters(in: .whitespaces)
-            guard id.hasPrefix("TT-") else { return nil }
-            let description = String(line[separator.upperBound..<boldEnd.lowerBound]).trimmingCharacters(in: .whitespaces)
-            let suffix = String(line[boldEnd.upperBound...])
-            let acceptance = suffix.split(separator: "Check:", maxSplits: 1).dropFirst().first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
-            let checked = line.count > 3 && line[line.index(line.startIndex, offsetBy: 3)] != " "
-            return Todo(id: id, description: description, acceptance: acceptance, status: checked ? .completed : .pending)
-        }
+        let todos = GitHubChecklist.parse(issue.body)
         return Plan(id: "github:\(repository)#\(issueNumber)", repository: repository, issueNumber: issueNumber, issueURL: issue.url, title: issue.title, todos: todos)
     }
     static func createIssue(repository: String, title: String, bodyFile: String) throws -> String {
@@ -132,6 +139,7 @@ struct TrackerTrapperCLI {
     import-issue --repo owner/name --issue 123
     create-issue --repo owner/name --title "Title" --body-file plan.md
     retry-registrations
+    set-next-task --run-id <id> --next-todo-id <todo-id|empty-string>
     get-plan --plan-id <id>
     start-run --plan-id <id> --agent <name> --session-id <id> [--repo-path <path>]
     update-task --run-id <id> --todo-id <id> --status <pending|in_progress|blocked|completed|skipped> [--message <text>] [--evidence <value>] [--event-id <id>]
@@ -140,6 +148,10 @@ struct TrackerTrapperCLI {
     activity --run-id <id> [--message <text>] [--event-id <id>]
     finish-run --run-id <id> --status <paused|interrupted|finished|failed|waiting_for_user>
     snapshot
+    watch-session --run-id <id> --source /absolute/session.jsonl --format codex|claude
+    unwatch-session --run-id <id>
+    watch-status
+    watch-once
     ack-outbox
     """) }
 }

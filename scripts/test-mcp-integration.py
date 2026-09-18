@@ -50,6 +50,16 @@ with tempfile.TemporaryDirectory(prefix="tracker-mcp-test-") as directory:
         for process in processes:
             assert call(process, "get_plan", planID=plan_id)["id"] == plan_id
         run = call(processes[0], "start_run", planID=plan_id, agent="test", sessionID="session", repositoryPath=directory)
+        schema = rpc(processes[0], "tools/list", {})["tools"]
+        assert "nextTodoID" in next(t for t in schema if t["name"] == "complete_task")["inputSchema"]["properties"]
+        call(processes[0], "set_next_task", runID=run["id"], nextTodoID="TT-02")
+        assert call(processes[1], "get_plan", planID=plan_id)["nextTodoID"] == "TT-02"
+        call(processes[0], "report_activity", runID=run["id"], nextTodoID="")
+        assert call(processes[1], "get_plan", planID=plan_id).get("nextTodoID") is None
+        call(processes[0], "start_task", runID=run["id"], todoID="TT-01", nextTodoID="TT-02")
+        bad = rpc(processes[0], "tools/call", dict(name="complete_task", arguments=dict(runID=run["id"], todoID="TT-01", nextTodoID="missing")))
+        assert bad["isError"]
+        assert call(processes[1], "get_plan", planID=plan_id)["todos"][0]["status"] == "in_progress"
         def complete(pair):
             index, process = pair
             return call(process, "complete_task", runID=run["id"], todoID=f"TT-0{index + 1}",
@@ -59,12 +69,13 @@ with tempfile.TemporaryDirectory(prefix="tracker-mcp-test-") as directory:
         complete((0, processes[2]))  # Retry through a different long-lived process.
         register((0, processes[3]))  # Re-registration must preserve completion/evidence.
         saved = call(processes[1], "get_plan", planID=plan_id)
+        assert saved.get("nextTodoID") is None
         assert all(todo["status"] == "completed" for todo in saved["todos"])
         assert all(todo["evidence"] == ["integration test"] for todo in saved["todos"])
         error = rpc(processes[0], "tools/call", dict(name="get_plan", arguments=dict(planID="missing")))
         assert error["isError"] is True
         assert len(json.loads(store.read_text())["plans"]) == 4
-        print("PASS: MCP envelopes, four concurrent processes, fresh reads, concurrent task updates, retries, re-registration, tool errors")
+        print("PASS: MCP envelopes, four concurrent processes, fresh reads, concurrent task updates, retries, re-registration, next-task schema/set/clear/atomic rejection/completion, tool errors")
     finally:
         for process in processes:
             process.stdin.close()
