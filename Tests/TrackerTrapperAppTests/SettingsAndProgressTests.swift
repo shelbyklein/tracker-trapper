@@ -4,6 +4,18 @@ import TrackerTrapperCore
 @testable import TrackerTrapperMenuBar
 
 final class SettingsAndProgressTests: XCTestCase {
+    @MainActor func testAgentReportingInstructionDefinesVerifiableTodoContract() {
+        let instruction = SettingsView.agentReportingInstruction
+        XCTAssertTrue(instruction.contains("make the plan itself Tracker Trapper-ready"))
+        XCTAssertTrue(instruction.contains("one-to-one to a persistent TT todo"))
+        XCTAssertTrue(instruction.contains("same ID and outcome wording"))
+        XCTAssertTrue(instruction.contains("stable ID"))
+        XCTAssertTrue(instruction.contains("one imperative outcome"))
+        XCTAssertTrue(instruction.contains("concrete pass/fail acceptance check"))
+        XCTAssertTrue(instruction.contains("bookkeeping-only todos"))
+        XCTAssertTrue(instruction.contains("Preserve IDs"))
+        XCTAssertTrue(instruction.contains("concrete evidence"))
+    }
     @MainActor func testSetupRejectsInvalidURLs() async throws {
         let plan = try SetupModel.issue(" https://github.com/owner/repo/issues/12?test=1 ")
         XCTAssertEqual(plan.id, "github:owner/repo#12")

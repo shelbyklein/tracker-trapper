@@ -230,6 +230,11 @@ Give the agent the issue URL and this instruction:
 
 > Use Tracker Trapper for this issue. Retrieve its plan and stable todo IDs;
 > register the agreed checklist if it is absent. Start your own session run.
+> Make the plan itself Tracker Trapper-ready before implementation begins; do
+> not write a prose plan and translate it afterward. Every plan item must map
+> one-to-one to a persistent TT todo with a stable ID, one imperative outcome,
+> and a concrete pass/fail acceptance check. Keep the same ID and outcome
+> wording in the plan and every Tracker Trapper update.
 > Call start_task before each todo, report activity at milestones, and call
 > complete_task only after its acceptance check passes, with concrete evidence.
 > Report blockers explicitly. Finish your own run with the actual status before

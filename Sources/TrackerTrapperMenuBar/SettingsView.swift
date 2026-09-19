@@ -112,9 +112,14 @@ struct SettingsView: View {
         let path = "'" + mcpPath.replacingOccurrences(of: "'", with: "'\\''") + "'"
         return provider == "Codex" ? "codex mcp add tracker-trapper -- \(path)" : "claude mcp add --transport stdio --scope user tracker-trapper -- \(path)"
     }
-    private var reportingInstruction: String {
-        "Use Tracker Trapper for this issue. Retrieve its plan and stable todo IDs; register the agreed checklist if absent. Start your own session run. Call start_task before each todo, report activity at milestones, and complete_task only after its acceptance check passes with evidence. Report blockers and the next immediate task. Finish your own run with its actual status. Do not close the issue without acceptance. First verify the connection with get_plan for an existing plan ID."
-    }
+    static let agentReportingInstruction = """
+    Use Tracker Trapper for this issue. Retrieve its plan and stable todo IDs; register the agreed checklist if absent. Start your own session run.
+
+    Planning contract: make the plan itself Tracker Trapper-ready before implementation begins; do not write a prose plan and translate it afterward. Every plan item must map one-to-one to a persistent TT todo with a stable ID, one imperative outcome, and a concrete pass/fail acceptance check. Use the same ID and outcome wording in the plan and all Tracker Trapper updates. Create the smallest useful independently verifiable items. Split implementation, tests, build, install, runtime verification, and user acceptance when they are genuinely separate gates; combine trivial steps. Avoid vague outcomes, chronological narration, and bookkeeping-only todos. Preserve IDs when wording or order changes, and add a new ID when scope grows.
+
+    Call start_task before each todo, report activity at milestones, and complete_task only after that todo's acceptance check passes with concrete evidence. Report blockers and the next immediate task. Finish your own run with its actual status. Do not close the issue without acceptance. First verify the connection with get_plan for an existing plan ID.
+    """
+    private var reportingInstruction: String { Self.agentReportingInstruction }
     var body: some View {
         VStack(spacing: 0) {
             TabView(selection: $tab) {

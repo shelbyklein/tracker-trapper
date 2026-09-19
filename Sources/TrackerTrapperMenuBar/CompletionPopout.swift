@@ -2,6 +2,13 @@ import AppKit
 import SwiftUI
 import TrackerTrapperCore
 
+struct CompletionContext: Equatable, Sendable {
+    var projectTitle: String?
+    var details: [String]
+
+    static let empty = CompletionContext(projectTitle: nil, details: [])
+}
+
 /// A tiny celebration that never activates the app or takes typing focus.
 @MainActor final class CompletionPopoutController {
     private(set) var panel: NSPanel?
@@ -11,18 +18,19 @@ import TrackerTrapperCore
         show(style: .plan(plan, isClosedIssue: isClosedIssue), context: Self.context(plan: plan, run: run), anchoredTo: button, onDismiss: onDismiss)
     }
 
-    static func context(plan: Plan, run: Run?) -> [String] {
-        var lines: [String] = []
+    static func context(plan: Plan, run: Run?) -> CompletionContext {
+        var projectTitle: String?
+        var details: [String] = []
         if let path = plan.workspacePath ?? run?.repositoryPath, !path.isEmpty {
-            lines.append("Project: \(URL(fileURLWithPath: path).lastPathComponent)")
+            projectTitle = URL(fileURLWithPath: path).lastPathComponent
         }
         if plan.isGitHub && !plan.repository.isEmpty {
-            lines.append(plan.repository + (plan.issueNumber > 0 ? " · Issue #\(plan.issueNumber)" : ""))
+            details.append(plan.repository + (plan.issueNumber > 0 ? " · Issue #\(plan.issueNumber)" : ""))
         }
         if let run, !run.sessionID.isEmpty {
-            lines.append("\(run.agent) · Session \(run.sessionID)")
+            details.append("\(run.agent) · Session \(run.sessionID)")
         }
-        return lines
+        return CompletionContext(projectTitle: projectTitle, details: details)
     }
 
     @discardableResult
@@ -37,11 +45,11 @@ import TrackerTrapperCore
 
     @discardableResult
     func showTestTaskList(anchoredTo button: NSView, onDismiss: @escaping () -> Void) -> Bool {
-        show(style: .testTaskList, context: ["Project: Tracker Trapper", "shelbyklein/tracker-trapper · Issue #12", "Codex · Example session"], anchoredTo: button, onDismiss: onDismiss)
+        show(style: .testTaskList, context: CompletionContext(projectTitle: "Tracker Trapper", details: ["shelbyklein/tracker-trapper · Issue #12", "Codex · Example session"]), anchoredTo: button, onDismiss: onDismiss)
     }
 
     @discardableResult
-    private func show(style: CompletionPopoutStyle, context: [String] = [], anchoredTo button: NSView, onDismiss: @escaping () -> Void) -> Bool {
+    private func show(style: CompletionPopoutStyle, context: CompletionContext = .empty, anchoredTo button: NSView, onDismiss: @escaping () -> Void) -> Bool {
         guard let window = button.window, let screen = window.screen ?? NSScreen.main else { return false }
         // macOS can leave a hidden/overflowed status item without a screen. Keep
         // the celebration visible at the top-right until its icon is available.
@@ -49,9 +57,10 @@ import TrackerTrapperCore
             ? window.convertToScreen(button.convert(button.bounds, to: nil))
             : NSRect(x: screen.visibleFrame.maxX - 36, y: screen.visibleFrame.maxY + 4, width: 24, height: 24)
         let list = style.taskList
-        let contextCount = min(context.count, 3)
+        let contextCount = min(context.details.count, 3)
         let contextHeight = contextCount == 0 ? 0 : contextCount * 26 + max(contextCount - 1, 0) * 6 + 12
-        let requestedHeight = 76 + (list?.todos.count ?? 0) * 34 + contextHeight
+        let projectHeight = context.projectTitle == nil ? 0 : 15
+        let requestedHeight = 76 + projectHeight + (list?.todos.count ?? 0) * 34 + contextHeight
         let height: CGFloat = list == nil ? 64 : min(CGFloat(requestedHeight), screen.visibleFrame.height - 24)
         let frame = Self.frame(anchor: anchor, screen: screen.visibleFrame, width: 360, height: height)
         let panel = self.panel ?? CelebrationPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -150,7 +159,7 @@ private final class CelebrationPanel: NSPanel {
 struct CompletedTaskList: View {
     let plan: Plan
     let height: CGFloat
-    var context: [String] = []
+    var context: CompletionContext = .empty
     let onDismiss: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var completed = Set<String>()
@@ -181,7 +190,17 @@ struct CompletedTaskList: View {
                         }
                     }
                 }.frame(width: 19, height: 19).accessibilityHidden(true)
-                Text(plan.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    if let projectTitle = context.projectTitle {
+                        Text(projectTitle)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(projectTitle)
+                    }
+                    Text(plan.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                }
                 Spacer()
                 Button(action: onDismiss) { Image(systemName: "xmark").font(.caption) }
                     .buttonStyle(.plain).accessibilityLabel("Dismiss task list")
@@ -241,9 +260,9 @@ struct CompletedTaskList: View {
                     } catch { }
                 }
             }
-            if !context.isEmpty {
+            if !context.details.isEmpty {
                 VStack(spacing: 6) {
-                    ForEach(Array(context.prefix(3).enumerated()), id: \.offset) { _, line in
+                    ForEach(Array(context.details.prefix(3).enumerated()), id: \.offset) { _, line in
                         Text(line)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)

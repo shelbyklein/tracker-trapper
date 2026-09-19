@@ -36,8 +36,8 @@ struct TrackerTrapperMCP {
 
     static var tools: [[String: Any]] {
         [
-        tool("register_plan", "Register or update a GitHub issue plan with stable todo IDs", ["repository": "string", "issueNumber": "integer", "issueURL": "string", "title": "string", "todos": "array"]),
-        tool("register_local_plan", "Register or retrieve a local plan without GitHub. creationRequestKey makes retries idempotent", ["title": "string", "todos": "array", "workspacePath": "string", "creationRequestKey": "string"]),
+        tool("register_plan", "Register or update a Tracker Trapper-ready GitHub issue plan. Plan directly as one-to-one persistent todos; each todo needs a stable id, one imperative description, and a concrete pass/fail acceptance check", ["repository": "string", "issueNumber": "integer", "issueURL": "string", "title": "string", "todos": "array"]),
+        tool("register_local_plan", "Register or retrieve a Tracker Trapper-ready local plan without GitHub. Plan directly as one-to-one persistent todos; each todo needs a stable id, one imperative description, and a concrete pass/fail acceptance check. creationRequestKey makes retries idempotent", ["title": "string", "todos": "array", "workspacePath": "string", "creationRequestKey": "string"]),
         tool("list_local_plans", "List persistent local plans for explicit resumption", [:]),
         tool("get_tracking_settings", "Read whether new interactive sessions should offer local tracking", [:]),
         tool("set_tracking_settings", "Enable or disable the local-tracking question for future sessions", ["askAtSessionStart": "boolean"]),

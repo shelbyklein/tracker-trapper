@@ -7,10 +7,10 @@ import TrackerTrapperCore
 final class CompletionPopoutTests: XCTestCase {
     @MainActor func testListContextIncludesOnlyAvailableDetails() {
         let local = Plan(localID: "local:test", title: "Finish UI", todos: [], workspacePath: "/work/My Project", creationRequestKey: "test")
-        XCTAssertEqual(CompletionPopoutController.context(plan: local, run: nil), ["Project: My Project"])
+        XCTAssertEqual(CompletionPopoutController.context(plan: local, run: nil), CompletionContext(projectTitle: "My Project", details: []))
         let issue = Plan(id: "issue", repository: "owner/repo", issueNumber: 12, issueURL: "", title: "Finish UI", todos: [])
         let run = Run(planID: issue.id, agent: "Codex", sessionID: "session-123", repositoryPath: "/work/repo")
-        XCTAssertEqual(CompletionPopoutController.context(plan: issue, run: run), ["Project: repo", "owner/repo · Issue #12", "Codex · Session session-123"])
+        XCTAssertEqual(CompletionPopoutController.context(plan: issue, run: run), CompletionContext(projectTitle: "repo", details: ["owner/repo · Issue #12", "Codex · Session session-123"]))
     }
 
     @MainActor func testFinishedListPreviewRendersAndDismisses() async throws {
@@ -19,7 +19,7 @@ final class CompletionPopoutTests: XCTestCase {
         XCTAssertEqual(plan.todos.count, 4)
         XCTAssertEqual(plan.todos.filter { $0.parentID != nil }.count, 2)
         var dismissed = false
-        let context = ["Project: Tracker Trapper", "shelbyklein/tracker-trapper · Issue #12", "Codex · Example session"]
+        let context = CompletionContext(projectTitle: "Tracker Trapper", details: ["shelbyklein/tracker-trapper · Issue #12", "Codex · Example session"])
         let host = NSHostingView(rootView: CompletedTaskList(plan: plan, height: 310, context: context, onDismiss: { dismissed = true }))
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 360, height: 310), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
